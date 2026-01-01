@@ -140,7 +140,9 @@ export function open(path: string): { shell: string } {
 }
 
 export function zed(path: string): { shell: string } {
-  return shell(`open -a /Applications/Zed.app "${path}"`)
+  // Expand ~ to $HOME for shell
+  const expandedPath = path.startsWith("~/") ? `$HOME${path.slice(1)}` : path
+  return shell(`open -a /Applications/Zed.app "${expandedPath}"`)
 }
 
 export function openUrl(url: string): { shell: string } {
