@@ -1,0 +1,106 @@
+version = 1
+name = "kar"
+
+[flow]
+primary_task = "deploy"
+
+[[tasks]]
+name = "default"
+command = """
+cat <<'EOF'
+Available tasks:
+- setup          Ensure Cargo is installed and fetch dependencies.
+- dev            Watch config and rebuild on changes.
+- build          Test build with example config (dry run).
+- run [args...]  Run kar CLI (passes CLI args through).
+- deploy         Build kar binary and install it to ~/bin/kar.
+EOF
+"""
+description = "List available tasks."
+
+[[tasks]]
+name = "setup"
+command = """
+set -euo pipefail
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "Rust toolchain 'cargo' not found in PATH."
+  echo "Install it via https://www.rust-lang.org/tools/install"
+  exit 1
+fi
+cargo --version >/dev/null
+repo_root="$PWD"
+export CARGO_HOME="${CARGO_HOME:-$repo_root/.cargo_home}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_root/target}"
+mkdir -p "$CARGO_HOME"
+mkdir -p "$CARGO_TARGET_DIR"
+if ! cargo fetch --manifest-path "$repo_root/Cargo.toml" >/dev/null; then
+  echo "Warning: unable to download Cargo dependencies; try again once network access is available."
+fi
+echo "you are setup"
+"""
+description = "Ensure Cargo is installed and fetch dependencies."
+
+[[tasks]]
+name = "dev"
+command = """
+set -euo pipefail
+repo_root="$PWD"
+export CARGO_HOME="${CARGO_HOME:-$repo_root/.cargo_home}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_root/target}"
+mkdir -p "$CARGO_HOME"
+mkdir -p "$CARGO_TARGET_DIR"
+cargo run --manifest-path "$repo_root/Cargo.toml" -- watch "$@"
+"""
+description = "Watch config and rebuild on changes."
+
+[[tasks]]
+name = "build"
+command = """
+set -euo pipefail
+repo_root="$PWD"
+export CARGO_HOME="${CARGO_HOME:-$repo_root/.cargo_home}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_root/target}"
+mkdir -p "$CARGO_HOME"
+mkdir -p "$CARGO_TARGET_DIR"
+cargo run --manifest-path "$repo_root/Cargo.toml" -- build --dry-run -c examples/nikita-config.ts
+"""
+description = "Test build with nikita-config.ts (dry run)."
+
+[[tasks]]
+name = "run"
+command = """
+set -euo pipefail
+repo_root="$PWD"
+export CARGO_HOME="${CARGO_HOME:-$repo_root/.cargo_home}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_root/target}"
+mkdir -p "$CARGO_HOME"
+mkdir -p "$CARGO_TARGET_DIR"
+cargo run --manifest-path "$repo_root/Cargo.toml" -- "$@"
+"""
+description = "Run kar CLI (passes CLI args through)."
+
+[[tasks]]
+name = "deploy"
+command = """
+set -euo pipefail
+repo_root="$PWD"
+bin_dir="$HOME/bin"
+config_dir="$HOME/.config/kar"
+bin_artifact="kar"
+bin_name="kar"
+mkdir -p "$bin_dir"
+mkdir -p "$config_dir"
+
+export CARGO_HOME="${CARGO_HOME:-$repo_root/.cargo_home}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_root/target}"
+mkdir -p "$CARGO_HOME"
+mkdir -p "$CARGO_TARGET_DIR"
+
+cargo build --manifest-path "$repo_root/Cargo.toml" --release
+cp "$CARGO_TARGET_DIR/release/$bin_artifact" "$bin_dir/$bin_name"
+chmod 755 "$bin_dir/$bin_name"
+cp -r "$repo_root/types" "$config_dir/types"
+echo "Installed CLI to $bin_dir/$bin_name"
+echo "Installed types to $config_dir/types"
+"""
+description = "Build kar binary and install it to ~/bin/kar."

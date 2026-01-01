@@ -1,0 +1,20 @@
+[package]
+name = "kar"
+version = "0.1.0"
+edition = "2021"
+description = "Fast Karabiner config in TypeScript"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+notify = { version = "6", default-features = false, features = ["macos_fsevent"] }
+dirs = "5"
+anyhow = "1"
+which = "7"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = "z"
