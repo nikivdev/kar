@@ -4,6 +4,8 @@
 
 ## Install
 
+Using [flow](https://github.com/nikivdev/flow):
+
 ```bash
 flow deploy
 ```
