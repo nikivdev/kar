@@ -2,6 +2,8 @@
 
 > Manage [Karabiner](https://github.com/pqrs-org/Karabiner-Elements) config in TypeScript
 
+Author's config as example can be seen [here](https://github.com/nikivdev/snaps/blob/main/config/kar/config.ts).
+
 ## Install
 
 Using [flow](https://github.com/nikivdev/flow):
