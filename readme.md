@@ -151,9 +151,9 @@ flow run    # Run kar CLI directly
 
 ## Contributing
 
-Make issues with bugs/features. Any PR to improve project is welcome. Ideally with **working** & **useful** patches but non finished ideas are great too. If idea/feature is sound, it will be merged eventually.
+Make issues with bugs/features or PRs. Unfinished work will be merged too if the idea is good. Software or docs can always be better.
 
-[This](https://nikiv.dev/how-i-code) is nice overview of a coding workflow that works that you can adapt.
+Thank you. Can see [this](https://nikiv.dev/how-i-code) for how to code fast with AI.
 
 ### 🖤
 
