@@ -1,6 +1,6 @@
 # kar
 
-Fast [Karabiner](https://github.com/pqrs-org/Karabiner-Elements) config in TypeScript.
+> Manage [Karabiner](https://github.com/pqrs-org/Karabiner-Elements) config in TypeScript
 
 ## Install
 
