@@ -74,12 +74,16 @@ export interface MouseKey {
   speed_multiplier?: number
 }
 
+// Pointing button (mouse click)
+export type PointingButton = "button1" | "button2" | "button3"
+
 // To key specification
 export type ToKey =
   | KeyCode
   | { key: KeyCode; modifiers?: Modifier | Modifier[] }
   | { shell: string }
   | { mouse_key: MouseKey }
+  | { pointing_button: PointingButton }
   | ToKey[] // Multiple actions
 
 // Condition for when a rule applies

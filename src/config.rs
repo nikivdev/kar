@@ -1,8 +1,8 @@
 use crate::karabiner::{
     Condition, FromEvent, FromKeyCode, FromModifiers, FromSimultaneous, Manipulator,
     ManipulatorParameters, Rule, SetVariable, SimpleModificationEntry, SimpleModificationKey,
-    SimultaneousKey, SimultaneousOptions, ToEvent, ToKeyCode, ToMouseKey, ToSetVariable,
-    ToShellCommand,
+    SimultaneousKey, SimultaneousOptions, ToEvent, ToKeyCode, ToMouseKey, ToPointingButton,
+    ToSetVariable, ToShellCommand,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -134,6 +134,9 @@ pub enum ToKey {
     },
     MouseKey {
         mouse_key: UserMouseKey,
+    },
+    PointingButton {
+        pointing_button: String,
     },
     Multiple(Vec<ToKey>),
 }
@@ -373,6 +376,12 @@ fn convert_to_events(to: &ToKey) -> Vec<ToEvent> {
                     horizontal_wheel: mouse_key.horizontal_wheel,
                     speed_multiplier: mouse_key.speed_multiplier,
                 },
+            })]
+        }
+        ToKey::PointingButton { pointing_button } => {
+            vec![ToEvent::PointingButton(ToPointingButton {
+                pointing_button: pointing_button.clone(),
+                modifiers: None,
             })]
         }
         ToKey::Multiple(keys) => keys.iter().flat_map(convert_to_events).collect(),
