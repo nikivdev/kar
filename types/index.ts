@@ -157,3 +157,24 @@ export function alfred(workflow: string, trigger: string, arg?: string): { shell
 export function raycast(extension: string): { shell: string } {
   return shell(`open -g "raycast://extensions/${extension}"`)
 }
+
+export function linWidget(
+  tsPath: string,
+  options?: {
+    ttlMs?: number
+  },
+): { shell: string } {
+  const expandedPath = tsPath.startsWith("~/") ? `$HOME${tsPath.slice(1)}` : tsPath
+  const runnerPath = "$HOME/config/i/kar/scripts/lin-widget-run.sh"
+  const logFile = "$HOME/Library/Logs/Lin/widget.log"
+  const quotedPath = JSON.stringify(expandedPath)
+  const quotedRunner = JSON.stringify(runnerPath)
+  const quotedLog = JSON.stringify(logFile)
+  const ttlMs = options?.ttlMs ?? 0
+  const pipeline = [
+    `log_file=${quotedLog}; mkdir -p \"$(dirname \\\"$log_file\\\")\";`,
+    ttlMs > 0 ? `export LIN_WIDGET_TTL_MS=${ttlMs};` : "",
+    `exec ${quotedRunner} ${quotedPath}`,
+  ].filter(Boolean).join(" ")
+  return shell(`bash -lc ${JSON.stringify(pipeline)}`)
+}
