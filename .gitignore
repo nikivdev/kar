@@ -3,6 +3,7 @@
 .claude/
 .codex/
 .flox/
+.ai/worktrees
 
 # core
 .DS_Store
