@@ -34,3 +34,5 @@ private
 .blade
 .npm-cache
 .cargo_home
+
+.ai/todos/*.bike
