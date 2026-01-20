@@ -2,20 +2,13 @@
 
 > Manage [Karabiner](https://github.com/pqrs-org/Karabiner-Elements) config in TypeScript
 
-Examples:
+## Dev 
 
-- [examples/simple/config.ts](examples/simple/config.ts) - all features explained
-- [examples/complex/config.ts](examples/complex/config.ts) - comprehensive real-world config
+With [flow](https://github.com/nikivdev/flow), run `f setup`, then `f` will search through list of tasks.
 
 ## Install
 
-Using [flow](https://github.com/nikivdev/flow):
-
-```bash
-flow deploy
-```
-
-Installs `kar` binary to `~/bin/kar` and types to `~/.config/kar/types/`.
+With [flow](https://github.com/nikivdev/flow), run: `f deploy` (this will put `kar` in your path).
 
 ## Usage
 
@@ -24,73 +17,13 @@ kar              # Build and apply config to 'kar' profile
 kar watch        # Watch config and rebuild on changes
 kar --dry-run    # Print generated JSON without writing
 kar -c other.ts  # Use different config file
-kar -p goku      # Target different profile
 kar init         # Create example config
 ```
 
-## Config
+## Examples
 
-Config lives at `~/.config/kar/config.ts`:
-
-```typescript
-import type { Config } from "./types/index.ts"
-import { km, shell, zed, open, alfred, raycast } from "./types/index.ts"
-
-export default {
-  profile: {
-    alone: 80,  // to_if_alone timeout (ms)
-    sim: 30,    // simultaneous key threshold (ms)
-  },
-
-  // Simple key remappings (no conditions)
-  simple: [
-    { from: "caps_lock", to: "escape" },
-  ],
-
-  // Simlayer definitions
-  simlayers: {
-    "s-mode": { key: "s", threshold: 250 },
-    "semicolon-mode": { key: "semicolon", threshold: 250 },
-  },
-
-  rules: [
-    // Simlayer rule - hold 's' to activate
-    {
-      description: "s-mode (navigation)",
-      layer: "s-mode",
-      mappings: [
-        { from: "h", to: "left_arrow" },
-        { from: "j", to: "down_arrow" },
-        { from: "k", to: "up_arrow" },
-        { from: "l", to: "right_arrow" },
-        { from: "d", to: "delete_or_backspace" },
-        { from: "f", to: "return_or_enter" },
-        { from: "a", to: { key: "c", modifiers: "left_command" } },  // Copy
-        { from: "n", to: { key: "v", modifiers: "left_command" } },  // Paste
-      ],
-    },
-
-    // Simultaneous keys (no layer)
-    {
-      description: "simultaneous keys",
-      mappings: [
-        { from: ["j", "k"], to: km("open Safari new tab") },
-        { from: ["k", "l"], to: shell("open -g raycast://...") },
-      ],
-    },
-
-    // Mouse scroll
-    {
-      description: "scroll mode",
-      layer: "d-mode",
-      mappings: [
-        { from: "j", to: { mouse_key: { vertical_wheel: 60 } } },
-        { from: "k", to: { mouse_key: { vertical_wheel: -60 } } },
-      ],
-    },
-  ],
-} satisfies Config
-```
+- [examples/simple/config.ts](examples/simple/config.ts) - all features explained
+- [examples/complex/config.ts](examples/complex/config.ts) - comprehensive real-world config
 
 ## Helper Functions
 
@@ -148,18 +81,8 @@ Multiple: `["left_command", "left_shift"]`
 ]}
 ```
 
-## Development
-
-```bash
-flow dev    # Watch and rebuild kar on source changes
-flow build  # Test build with example config
-flow run    # Run kar CLI directly
-```
-
 ## Contributing
 
 [Use AI](https://nikiv.dev/how-i-code) & [flow](https://github.com/nikivdev/flow). All meaningful issues and PRs will be merged in. Thank you.
-
-### 🖤
 
 [![Discord](https://go.nikiv.dev/badge-discord)](https://go.nikiv.dev/discord) [![X](https://go.nikiv.dev/badge-x)](https://x.com/nikivdev) [![nikiv.dev](https://go.nikiv.dev/badge-nikiv)](https://nikiv.dev)
