@@ -77,11 +77,17 @@ export interface MouseKey {
 // Pointing button (mouse click)
 export type PointingButton = "button1" | "button2" | "button3"
 
+export interface SocketCommand {
+  endpoint: string
+  command: string
+}
+
 // To key specification
 export type ToKey =
   | KeyCode
   | { key: KeyCode; modifiers?: Modifier | Modifier[] }
   | { shell: string }
+  | { socket_command: SocketCommand }
   | { mouse_key: MouseKey }
   | { pointing_button: PointingButton }
   | ToKey[] // Multiple actions
@@ -129,6 +135,14 @@ export interface Config {
 // Helper functions for building shell commands
 export function shell(command: string): { shell: string } {
   return { shell: command }
+}
+
+export function socketCommand(endpoint: string, command: string): { socket_command: SocketCommand } {
+  return { socket_command: { endpoint, command } }
+}
+
+export function seqSocket(macroName: string, endpoint = "/tmp/seqd.sock"): { socket_command: SocketCommand } {
+  return socketCommand(endpoint, `RUN ${macroName}`)
 }
 
 export function km(macroName: string): { shell: string } {

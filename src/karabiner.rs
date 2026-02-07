@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::path::Path;
 
 // Karabiner JSON types matching the official spec
@@ -168,6 +169,7 @@ pub enum ToEvent {
     ConsumerKeyCode(ToConsumerKeyCode),
     PointingButton(ToPointingButton),
     ShellCommand(ToShellCommand),
+    SocketCommand(ToSocketCommand),
     SetVariable(ToSetVariable),
     MouseKey(ToMouseKey),
 }
@@ -200,6 +202,17 @@ pub struct ToKeyCode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToShellCommand {
     pub shell_command: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SocketCommand {
+    pub endpoint: String,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToSocketCommand {
+    pub socket_command: SocketCommand,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,6 +274,7 @@ pub fn update_profile(
     profile_name: &str,
     rules: Vec<Rule>,
     simple_modifications: Vec<SimpleModificationEntry>,
+    parameters: Option<Parameters>,
 ) -> Result<()> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read {}", path.display()))?;
@@ -268,13 +282,45 @@ pub fn update_profile(
     let mut config: KarabinerConfig =
         serde_json::from_str(&content).context("Failed to parse karabiner.json")?;
 
+    if !config.profiles.iter().any(|p| p.name == profile_name) {
+        let template_other = config
+            .profiles
+            .iter()
+            .find(|p| p.selected)
+            .or_else(|| config.profiles.first())
+            .map(|p| p.other.clone())
+            .unwrap_or_else(|| {
+                let mut other = serde_json::Map::new();
+                other.insert(
+                    "virtual_hid_keyboard".to_string(),
+                    json!({ "keyboard_type_v2": "ansi" }),
+                );
+                other
+            });
+
+        config.profiles.push(Profile {
+            name: profile_name.to_string(),
+            selected: false,
+            simple_modifications: Vec::new(),
+            complex_modifications: ComplexModifications::default(),
+            other: template_other,
+        });
+    }
+
+    for p in &mut config.profiles {
+        p.selected = p.name == profile_name;
+    }
+
     let profile = config
         .profiles
         .iter_mut()
         .find(|p| p.name == profile_name)
-        .with_context(|| format!("Profile '{}' not found", profile_name))?;
+        .with_context(|| format!("Profile '{}' not found after creation", profile_name))?;
 
     profile.complex_modifications.rules = rules;
+    if let Some(params) = parameters {
+        profile.complex_modifications.parameters = params;
+    }
     if !simple_modifications.is_empty() {
         profile.simple_modifications = simple_modifications;
     }

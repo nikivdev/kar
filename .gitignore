@@ -36,3 +36,10 @@ private
 .cargo_home
 
 .ai/todos/*.bike
+.ai/web/
+.ai/skills/
+.rise/
+.ai/review-log.jsonl
+.ai/state.json
+
+.beads/

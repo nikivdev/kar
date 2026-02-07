@@ -68,6 +68,7 @@ fn build(config_path: &PathBuf, dry_run: bool, profile: &str) -> Result<()> {
     // Convert to Karabiner format
     let rules = config::to_karabiner_rules(&user_config)?;
     let simple_mods = config::to_simple_modifications(&user_config);
+    let parameters = config::to_karabiner_parameters(&user_config.profile);
 
     if dry_run {
         let output = serde_json::to_string_pretty(&rules)?;
@@ -80,7 +81,7 @@ fn build(config_path: &PathBuf, dry_run: bool, profile: &str) -> Result<()> {
         .context("Could not find home directory")?
         .join(".config/karabiner/karabiner.json");
 
-    karabiner::update_profile(&karabiner_path, profile, rules, simple_mods)?;
+    karabiner::update_profile(&karabiner_path, profile, rules, simple_mods, Some(parameters))?;
 
     println!("Updated profile '{}'", profile);
     Ok(())

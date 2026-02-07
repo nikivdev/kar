@@ -1,8 +1,8 @@
 use crate::karabiner::{
     Condition, FromEvent, FromKeyCode, FromModifiers, FromSimultaneous, Manipulator,
-    ManipulatorParameters, Rule, SetVariable, SimpleModificationEntry, SimpleModificationKey,
-    SimultaneousKey, SimultaneousOptions, ToEvent, ToKeyCode, ToMouseKey, ToPointingButton,
-    ToSetVariable, ToShellCommand,
+    ManipulatorParameters, Parameters, Rule, SetVariable, SimpleModificationEntry,
+    SimpleModificationKey, SimultaneousKey, SimultaneousOptions, SocketCommand, ToEvent, ToKeyCode,
+    ToMouseKey, ToPointingButton, ToSetVariable, ToShellCommand, ToSocketCommand,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -132,6 +132,9 @@ pub enum ToKey {
     Shell {
         shell: String,
     },
+    SocketCommand {
+        socket_command: SocketCommand,
+    },
     MouseKey {
         mouse_key: UserMouseKey,
     },
@@ -173,6 +176,14 @@ fn convert_rule(user_rule: &UserRule, config: &UserConfig) -> Result<Rule> {
     })
 }
 
+pub fn to_karabiner_parameters(profile: &ProfileSettings) -> Parameters {
+    Parameters {
+        simultaneous_threshold: Some(profile.sim),
+        to_if_alone_timeout: Some(profile.alone),
+        ..Default::default()
+    }
+}
+
 fn convert_mapping(
     mapping: &Mapping,
     simlayer: Option<(&String, &Simlayer)>,
@@ -203,7 +214,9 @@ fn convert_mapping(
             let from = FromEvent::Simultaneous(FromSimultaneous {
                 simultaneous: keys.iter().map(|k| SimultaneousKey { key_code: k.clone() }).collect(),
                 simultaneous_options: Some(SimultaneousOptions {
-                    detect_key_down_uninterruptedly: Some(true),
+                    // For ad-hoc simultaneous chords (j+k etc), allow small timing noise.
+                    // Simlayers have their own stricter settings.
+                    detect_key_down_uninterruptedly: Some(false),
                     key_down_order: Some("insensitive".to_string()),
                     key_up_order: Some("insensitive".to_string()),
                     key_up_when: Some("any".to_string()),
@@ -279,8 +292,12 @@ fn convert_mapping(
                 // Simultaneous trigger (layer key + this key activates layer)
                 let sim_from = FromEvent::Simultaneous(FromSimultaneous {
                     simultaneous: vec![
-                        SimultaneousKey { key_code: layer.key.clone() },
-                        SimultaneousKey { key_code: key_code.clone() },
+                        SimultaneousKey {
+                            key_code: layer.key.clone(),
+                        },
+                        SimultaneousKey {
+                            key_code: key_code.clone(),
+                        },
                     ],
                     simultaneous_options: Some(SimultaneousOptions {
                         detect_key_down_uninterruptedly: Some(true),
@@ -365,6 +382,11 @@ fn convert_to_events(to: &ToKey) -> Vec<ToEvent> {
         ToKey::Shell { shell } => {
             vec![ToEvent::ShellCommand(ToShellCommand {
                 shell_command: shell.clone(),
+            })]
+        }
+        ToKey::SocketCommand { socket_command } => {
+            vec![ToEvent::SocketCommand(ToSocketCommand {
+                socket_command: socket_command.clone(),
             })]
         }
         ToKey::MouseKey { mouse_key } => {
