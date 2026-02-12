@@ -25,7 +25,7 @@ kar init         # Create example config
 - [examples/simple/config.ts](examples/simple/config.ts) - all features explained
 - [examples/complex/config.ts](examples/complex/config.ts) - comprehensive real-world config
 
-Author's karabiner config can be seen [here](https://github.com/nikivdev/snaps/blob/main/kar/config.ts). [This PR](https://github.com/pqrs-org/Karabiner-Elements/pull/4396) to Karabiner has more useful context about this config.
+Author's karabiner config can be seen [here](https://github.com/nikivdev/snaps/blob/main/kar/config.ts). [This PR](https://github.com/pqrs-org/Karabiner-Elements/pull/4396) to Karabiner has more useful context about this config. It uses [seq](https://github.com/nikivdev/seq) heavily. Can read [this](https://github.com/nikivdev/seq/blob/main/docs/karabiner-setup.md) to try set it up but it is unstable.
 
 ## Helper Functions
 
