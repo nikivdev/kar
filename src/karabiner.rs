@@ -170,6 +170,7 @@ pub enum ToEvent {
     PointingButton(ToPointingButton),
     ShellCommand(ToShellCommand),
     SocketCommand(ToSocketCommand),
+    SendUserCommand(ToSendUserCommand),
     SetVariable(ToSetVariable),
     MouseKey(ToMouseKey),
 }
@@ -213,6 +214,18 @@ pub struct SocketCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToSocketCommand {
     pub socket_command: SocketCommand,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendUserCommand {
+    pub payload: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToSendUserCommand {
+    pub send_user_command: SendUserCommand,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

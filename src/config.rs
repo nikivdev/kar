@@ -2,7 +2,8 @@ use crate::karabiner::{
     Condition, FromEvent, FromKeyCode, FromModifiers, FromSimultaneous, Manipulator,
     ManipulatorParameters, Parameters, Rule, SetVariable, SimpleModificationEntry,
     SimpleModificationKey, SimultaneousKey, SimultaneousOptions, SocketCommand, ToEvent, ToKeyCode,
-    ToMouseKey, ToPointingButton, ToSetVariable, ToShellCommand, ToSocketCommand,
+    ToMouseKey, ToPointingButton, ToSendUserCommand, ToSetVariable, ToShellCommand,
+    ToSocketCommand,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -121,6 +122,13 @@ pub struct UserMouseKey {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendUserCommand {
+    pub payload: serde_json::Value,
+    #[serde(default)]
+    pub endpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToKey {
     Simple(String),
@@ -134,6 +142,9 @@ pub enum ToKey {
     },
     SocketCommand {
         socket_command: SocketCommand,
+    },
+    SendUserCommand {
+        send_user_command: SendUserCommand,
     },
     MouseKey {
         mouse_key: UserMouseKey,
@@ -387,6 +398,14 @@ fn convert_to_events(to: &ToKey) -> Vec<ToEvent> {
         ToKey::SocketCommand { socket_command } => {
             vec![ToEvent::SocketCommand(ToSocketCommand {
                 socket_command: socket_command.clone(),
+            })]
+        }
+        ToKey::SendUserCommand { send_user_command } => {
+            vec![ToEvent::SendUserCommand(ToSendUserCommand {
+                send_user_command: crate::karabiner::SendUserCommand {
+                    payload: send_user_command.payload.clone(),
+                    endpoint: send_user_command.endpoint.clone(),
+                },
             })]
         }
         ToKey::MouseKey { mouse_key } => {
