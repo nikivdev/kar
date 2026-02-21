@@ -81,6 +81,17 @@ Multiple: `["left_command", "left_shift"]`
   { key: "left_arrow", modifiers: "left_option" },
   { key: "right_arrow", modifiers: ["left_option", "left_shift"] }
 ]}
+
+// Optional note for documentation
+{ from: "o", note: "Open X front page in Arc", to: [open("Arc"), { key: "1", modifiers: "left_control" }] }
+
+// Optional stable ids + signal metadata (schema-only, no runtime latency impact in kar)
+{
+  id: "map.open.arc.home",
+  from: "o",
+  to: open("https://arc.net"),
+  signal: { intent: "open_arc_home", tags: ["browser", "nav"], criticality: "low" },
+}
 ```
 
 ## Contributing

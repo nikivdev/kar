@@ -26,6 +26,8 @@ pub struct UserConfig {
 pub struct SimpleModification {
     pub from: String,
     pub to: String,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -48,33 +50,68 @@ pub struct Simlayer {
     pub key: String,
     #[serde(default)]
     pub threshold: Option<u32>,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserRule {
+    #[serde(default)]
+    pub id: Option<String>,
     pub description: String,
     #[serde(default)]
     pub layer: Option<String>,
     #[serde(default)]
     pub condition: Option<UserCondition>,
+    #[serde(default)]
+    pub note: Option<String>,
     pub mappings: Vec<Mapping>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum UserCondition {
-    App { app: String },
-    Variable { variable: String, value: serde_json::Value },
+    App {
+        app: String,
+    },
+    Variable {
+        variable: String,
+        value: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mapping {
+    #[serde(default)]
+    pub id: Option<String>,
     pub from: FromKey,
     pub to: ToKey,
     #[serde(default)]
     pub to_if_alone: Option<ToKey>,
     #[serde(default)]
     pub to_if_held: Option<ToKey>,
+    #[serde(default)]
+    pub signal: Option<MappingSignal>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MappingSignal {
+    #[serde(default)]
+    pub intent: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub criticality: Option<SignalCriticality>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SignalCriticality {
+    Low,
+    Med,
+    High,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,7 +260,12 @@ fn convert_mapping(
         FromKey::Simultaneous(keys) => {
             // Simultaneous key press (e.g., j+k together)
             let from = FromEvent::Simultaneous(FromSimultaneous {
-                simultaneous: keys.iter().map(|k| SimultaneousKey { key_code: k.clone() }).collect(),
+                simultaneous: keys
+                    .iter()
+                    .map(|k| SimultaneousKey {
+                        key_code: k.clone(),
+                    })
+                    .collect(),
                 simultaneous_options: Some(SimultaneousOptions {
                     // For ad-hoc simultaneous chords (j+k etc), allow small timing noise.
                     // Simlayers have their own stricter settings.
@@ -256,7 +298,11 @@ fn convert_mapping(
             // Single key or key with modifiers
             let (key_code, from_mods) = match &mapping.from {
                 FromKey::Simple(key) => (key.clone(), None),
-                FromKey::WithModifiers { key, modifiers, optional } => {
+                FromKey::WithModifiers {
+                    key,
+                    modifiers,
+                    optional,
+                } => {
                     let mods = FromModifiers {
                         mandatory: modifiers.as_ref().map(|m| m.to_vec()),
                         optional: optional.clone(),
@@ -443,4 +489,60 @@ pub fn to_simple_modifications(config: &UserConfig) -> Vec<SimpleModificationEnt
             }],
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn note_fields_deserialize_without_changing_behavior() {
+        let json = r#"{
+          "simple": [
+            { "from": "caps_lock", "to": "escape", "note": "tap for escape" }
+          ],
+          "simlayers": {
+            "o-mode": { "key": "o", "threshold": 250, "note": "openers" }
+          },
+          "rules": [
+            {
+              "id": "rule.test",
+              "description": "test",
+              "note": "rule doc",
+              "mappings": [
+                {
+                  "id": "map.open.test",
+                  "from": "o",
+                  "to": "escape",
+                  "note": "opens x front page",
+                  "signal": {
+                    "intent": "open_test",
+                    "tags": ["test", "editor"],
+                    "criticality": "med"
+                  }
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        assert_eq!(config.rules[0].id.as_deref(), Some("rule.test"));
+        assert_eq!(config.rules[0].mappings[0].id.as_deref(), Some("map.open.test"));
+        assert_eq!(
+            config.rules[0].mappings[0]
+                .signal
+                .as_ref()
+                .and_then(|s| s.intent.as_deref()),
+            Some("open_test")
+        );
+        assert_eq!(
+            config.rules[0].mappings[0].note.as_deref(),
+            Some("opens x front page")
+        );
+
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].manipulators.len(), 1);
+    }
 }

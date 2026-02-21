@@ -67,6 +67,30 @@ cargo run --manifest-path "$repo_root/Cargo.toml" -- build --dry-run -c examples
 description = "Test build with nikita-config.ts (dry run)."
 
 [[tasks]]
+name = "signal-scan"
+command = """
+set -euo pipefail
+out="${KAR_SIGNAL_SCAN_OUT:-$HOME/.local/state/kar/signal-scan.json}"
+python3 scripts/scan_config_signals.py \
+  "$HOME/.config/kar/config.ts" \
+  "/Users/nikiv/config/i/kar/config.ts" \
+  "examples/config.ts" \
+  "examples/simple/config.ts" \
+  "examples/complex/config.ts" \
+  --output "$out"
+echo "report: $out"
+"""
+description = "Scan Kar configs for keyboard telemetry readiness (actions/metadata/coverage)."
+
+[[tasks]]
+name = "signal-scan-report"
+command = """
+set -euo pipefail
+cat "${KAR_SIGNAL_SCAN_OUT:-$HOME/.local/state/kar/signal-scan.json}"
+"""
+description = "Show latest Kar signal scan report JSON."
+
+[[tasks]]
 name = "run"
 command = """
 set -euo pipefail

@@ -57,6 +57,8 @@ export interface Simlayer {
   key: KeyCode
   /** Optional custom threshold in ms */
   threshold?: number
+  /** Optional metadata/documentation field */
+  note?: string
 }
 
 // From key specification
@@ -97,23 +99,44 @@ export type Condition =
   | { app: string }
   | { variable: string; value: number | boolean | string }
 
+export type SignalCriticality = "low" | "med" | "high"
+
+export interface MappingSignal {
+  /** Optional normalized intent label for training data attribution */
+  intent?: string
+  /** Optional free-form tags for downstream filtering */
+  tags?: string[]
+  /** Optional priority/impact indicator */
+  criticality?: SignalCriticality
+}
+
 // A single key mapping
 export interface Mapping {
+  /** Stable mapping id for telemetry join/dedupe */
+  id?: string
   from: FromKey
   to: ToKey
   /** Action when key is released quickly (tap) */
   to_if_alone?: ToKey
   /** Action when key is held down */
   to_if_held?: ToKey
+  /** Optional structured signal metadata (schema-only; no runtime cost in kar) */
+  signal?: MappingSignal
+  /** Optional metadata/documentation field */
+  note?: string
 }
 
 // A rule containing multiple mappings
 export interface Rule {
+  /** Stable rule id for telemetry join/dedupe */
+  id?: string
   description: string
   /** Simlayer name to use for these mappings */
   layer?: string
   /** Condition for when this rule applies */
   condition?: Condition
+  /** Optional metadata/documentation field */
+  note?: string
   mappings: Mapping[]
 }
 
@@ -121,6 +144,8 @@ export interface Rule {
 export interface SimpleModification {
   from: KeyCode
   to: KeyCode
+  /** Optional metadata/documentation field */
+  note?: string
 }
 
 // Main config structure
