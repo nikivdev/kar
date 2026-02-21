@@ -81,6 +81,24 @@ def _count_to_action(action: Any, counts: dict[str, int]) -> None:
         counts["to_unknown"] += 1
 
 
+def _to_has_action(action: Any, action_key: str) -> bool:
+    if isinstance(action, list):
+        return any(_to_has_action(item, action_key) for item in action)
+    if not isinstance(action, dict):
+        return False
+    if action_key in action:
+        return True
+    return False
+
+
+def _mapping_uses_action(mapping: dict[str, Any], action_key: str) -> bool:
+    return (
+        _to_has_action(mapping.get("to"), action_key)
+        or _to_has_action(mapping.get("to_if_alone"), action_key)
+        or _to_has_action(mapping.get("to_if_held"), action_key)
+    )
+
+
 def analyze_config(payload: dict[str, Any]) -> dict[str, Any]:
     rules = payload.get("rules") if isinstance(payload.get("rules"), list) else []
     simlayers = payload.get("simlayers") if isinstance(payload.get("simlayers"), dict) else {}
@@ -98,6 +116,10 @@ def analyze_config(payload: dict[str, Any]) -> dict[str, Any]:
         "mappings_with_signal_intent": 0,
         "mappings_with_signal_tags": 0,
         "mappings_with_signal_criticality": 0,
+        "mappings_with_send_user_command": 0,
+        "send_user_command_mappings_with_id": 0,
+        "send_user_command_mappings_with_signal": 0,
+        "send_user_command_mappings_with_signal_intent": 0,
         "rules_with_note": 0,
         "rules_with_layer": 0,
         "rules_with_condition": 0,
@@ -147,6 +169,15 @@ def analyze_config(payload: dict[str, Any]) -> dict[str, Any]:
                 if signal.get("criticality"):
                     counts["mappings_with_signal_criticality"] += 1
 
+            if _mapping_uses_action(mapping, "send_user_command"):
+                counts["mappings_with_send_user_command"] += 1
+                if mapping.get("id"):
+                    counts["send_user_command_mappings_with_id"] += 1
+                if isinstance(signal, dict):
+                    counts["send_user_command_mappings_with_signal"] += 1
+                    if signal.get("intent"):
+                        counts["send_user_command_mappings_with_signal_intent"] += 1
+
             frm = mapping.get("from")
             if isinstance(frm, str):
                 counts["from_simple"] += 1
@@ -162,11 +193,22 @@ def analyze_config(payload: dict[str, Any]) -> dict[str, Any]:
                 _count_to_action(mapping.get("to_if_held"), counts)
 
     mappings = max(1, counts["mappings"])
+    send_user_command_mappings = max(1, counts["mappings_with_send_user_command"])
     ratios = {
         "rule_id_coverage": round(counts["rules_with_id"] / max(1, counts["rules"]), 4),
         "mapping_id_coverage": round(counts["mappings_with_id"] / mappings, 4),
         "mapping_signal_coverage": round(counts["mappings_with_signal"] / mappings, 4),
         "mapping_signal_intent_coverage": round(counts["mappings_with_signal_intent"] / mappings, 4),
+        "send_user_command_mapping_id_coverage": round(
+            counts["send_user_command_mappings_with_id"] / send_user_command_mappings, 4
+        ),
+        "send_user_command_mapping_signal_coverage": round(
+            counts["send_user_command_mappings_with_signal"] / send_user_command_mappings, 4
+        ),
+        "send_user_command_mapping_signal_intent_coverage": round(
+            counts["send_user_command_mappings_with_signal_intent"] / send_user_command_mappings,
+            4,
+        ),
         "mapping_note_coverage": round(counts["mappings_with_note"] / mappings, 4),
         "observable_action_share": round(
             (counts["to_send_user_command"] + counts["to_socket_command"])
@@ -208,6 +250,7 @@ def summarize_many(results: list[dict[str, Any]]) -> dict[str, Any]:
             totals[key] = totals.get(key, 0) + int(value)
 
     mappings = max(1, totals.get("mappings", 0))
+    send_user_command_mappings = max(1, totals.get("mappings_with_send_user_command", 0))
     action_total = max(
         1,
         totals.get("to_send_user_command", 0)
@@ -224,6 +267,18 @@ def summarize_many(results: list[dict[str, Any]]) -> dict[str, Any]:
         "mapping_signal_coverage": round(totals.get("mappings_with_signal", 0) / mappings, 4),
         "mapping_signal_intent_coverage": round(
             totals.get("mappings_with_signal_intent", 0) / mappings,
+            4,
+        ),
+        "send_user_command_mapping_id_coverage": round(
+            totals.get("send_user_command_mappings_with_id", 0) / send_user_command_mappings,
+            4,
+        ),
+        "send_user_command_mapping_signal_coverage": round(
+            totals.get("send_user_command_mappings_with_signal", 0) / send_user_command_mappings,
+            4,
+        ),
+        "send_user_command_mapping_signal_intent_coverage": round(
+            totals.get("send_user_command_mappings_with_signal_intent", 0) / send_user_command_mappings,
             4,
         ),
         "mapping_note_coverage": round(totals.get("mappings_with_note", 0) / mappings, 4),

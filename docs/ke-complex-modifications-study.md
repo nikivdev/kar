@@ -130,6 +130,10 @@ Why this matters:
   - id/signal coverage below threshold on `send_user_command` mappings
 - Equivalent to KE’s fail-fast lint culture.
 
+Status:
+- Implemented.
+- `f signal-gate` now runs scan + threshold checks from one task.
+
 2. **Namespace validator for IDs/signals (high priority)**
 - Enforce pattern (e.g., `domain.feature.action`) for `rule.id`, `mapping.id`.
 - Catch collisions and empty IDs pre-build.
@@ -160,4 +164,3 @@ git -C ~/repos/pqrs-org/KE-complex_modifications log --no-merges --oneline -n 20
 find ~/repos/pqrs-org/KE-complex_modifications/public/json -name '*.json' | wc -l
 python3 <corpus-stats-script>
 ```
-

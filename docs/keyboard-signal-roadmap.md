@@ -131,6 +131,20 @@ Status:
   - enrichment happens once during config->Karabiner JSON generation, not per keystroke dispatch
   - no new shell/network calls were added in the key path
 
+### Phase 4 (quality gate)
+
+Enforce telemetry-readiness thresholds before training/export runs.
+
+Status:
+- Implemented as `scripts/signal_gate.py` + Flow task `f signal-gate`.
+- Gate fails fast when any threshold is violated:
+  - `observable_action_share >= 0.70`
+  - `shell_action_share <= 0.02`
+  - `send_user_command_mapping_id_coverage >= 0.50`
+  - `send_user_command_mapping_signal_coverage >= 0.50`
+  - `send_user_command_mapping_signal_intent_coverage >= 0.50`
+- Uses scan output from `kar_signal_scan_v1`; runs scan+gate in one command.
+
 ## Latency Guardrails
 
 Non-negotiables:
@@ -145,6 +159,7 @@ Non-negotiables:
 cd ~/code/kar
 f signal-scan
 f signal-scan-report
+f signal-gate
 ```
 
 Raw scanner usage:
@@ -155,6 +170,13 @@ python3 scripts/scan_config_signals.py \
   /Users/nikiv/config/i/kar/config.ts \
   examples/config.ts examples/simple/config.ts examples/complex/config.ts \
   --output ~/.local/state/kar/signal-scan.json
+```
+
+Gate-only usage:
+
+```bash
+python3 scripts/signal_gate.py \
+  --report ~/.local/state/kar/signal-scan.json
 ```
 
 ## Definition of "Good Enough" Before Next Kar-RL Cycle

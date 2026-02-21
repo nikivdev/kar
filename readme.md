@@ -6,6 +6,17 @@
 
 With [flow](https://github.com/nikivdev/flow), run `f setup`, then `f` will search through list of tasks.
 
+## Signal Quality Gate
+
+Run before training-data export or RL prep:
+
+```bash
+cd ~/code/kar
+f signal-gate
+```
+
+This runs config scan + threshold checks and fails fast if telemetry quality drops.
+
 ## Install
 
 With [flow](https://github.com/nikivdev/flow), run: `f deploy` (this will put `kar` in your path).
