@@ -74,6 +74,15 @@ pub enum UserCondition {
     App {
         app: String,
     },
+    Apps {
+        apps: Vec<String>,
+    },
+    AppUnless {
+        app_unless: String,
+    },
+    AppsUnless {
+        apps_unless: Vec<String>,
+    },
     Variable {
         variable: String,
         value: serde_json::Value,
@@ -253,6 +262,24 @@ fn convert_mapping(
         UserCondition::App { app } => {
             vec![Condition::FrontmostAppIf {
                 bundle_identifiers: Some(vec![app.clone()]),
+                file_paths: None,
+            }]
+        }
+        UserCondition::Apps { apps } => {
+            vec![Condition::FrontmostAppIf {
+                bundle_identifiers: Some(apps.clone()),
+                file_paths: None,
+            }]
+        }
+        UserCondition::AppUnless { app_unless } => {
+            vec![Condition::FrontmostAppUnless {
+                bundle_identifiers: Some(vec![app_unless.clone()]),
+                file_paths: None,
+            }]
+        }
+        UserCondition::AppsUnless { apps_unless } => {
+            vec![Condition::FrontmostAppUnless {
+                bundle_identifiers: Some(apps_unless.clone()),
                 file_paths: None,
             }]
         }
@@ -752,6 +779,77 @@ mod tests {
         assert_eq!(
             send_user_command.send_user_command.payload.as_str(),
             Some("plain-string")
+        );
+    }
+
+    #[test]
+    fn apps_condition_maps_to_frontmost_application_if() {
+        let json = r#"{
+          "rules": [
+            {
+              "description": "Scoped by multiple apps",
+              "condition": {
+                "apps": ["^com\\.apple\\.Terminal$", "^dev\\.zed\\.Zed$"]
+              },
+              "mappings": [
+                { "from": "j", "to": "down_arrow" }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let conds = rules[0].manipulators[0]
+            .conditions
+            .as_ref()
+            .expect("conditions");
+        let Condition::FrontmostAppIf {
+            bundle_identifiers, ..
+        } = &conds[0]
+        else {
+            panic!("expected frontmost_application_if");
+        };
+        assert_eq!(
+            bundle_identifiers.as_ref().expect("bundle ids").len(),
+            2
+        );
+    }
+
+    #[test]
+    fn app_unless_condition_maps_to_frontmost_application_unless() {
+        let json = r#"{
+          "rules": [
+            {
+              "description": "Scoped by app unless",
+              "condition": {
+                "app_unless": "^com\\.apple\\.Xcode$"
+              },
+              "mappings": [
+                { "from": "k", "to": "up_arrow" }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let conds = rules[0].manipulators[0]
+            .conditions
+            .as_ref()
+            .expect("conditions");
+        let Condition::FrontmostAppUnless {
+            bundle_identifiers, ..
+        } = &conds[0]
+        else {
+            panic!("expected frontmost_application_unless");
+        };
+        assert_eq!(
+            bundle_identifiers
+                .as_ref()
+                .and_then(|v| v.first())
+                .map(String::as_str),
+            Some("^com\\.apple\\.Xcode$")
         );
     }
 }
