@@ -160,6 +160,7 @@ cd ~/code/kar
 f signal-scan
 f signal-scan-report
 f signal-gate
+f signal-fix-plan
 ```
 
 Raw scanner usage:

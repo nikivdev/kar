@@ -13,6 +13,7 @@ Available tasks:
 - dev            Watch config and rebuild on changes.
 - build          Test build with example config (dry run).
 - signal-gate    Run scan + telemetry quality thresholds.
+- signal-fix-plan Show exact mappings missing ids/signal metadata.
 - run [args...]  Run kar CLI (passes CLI args through).
 - deploy         Build kar binary and install it to ~/bin/kar.
 EOF
@@ -112,6 +113,20 @@ python3 scripts/signal_gate.py \
   --min-send-user-command-intent-coverage "${KAR_GATE_MIN_SEND_INTENT_COVERAGE:-0.50}"
 """
 description = "Run signal scan and enforce telemetry-readiness thresholds."
+
+[[tasks]]
+name = "signal-fix-plan"
+command = """
+set -euo pipefail
+python3 scripts/signal_fix_plan.py \
+  "$HOME/.config/kar/config.ts" \
+  "/Users/nikiv/config/i/kar/config.ts" \
+  "examples/config.ts" \
+  "examples/simple/config.ts" \
+  "examples/complex/config.ts" \
+  --limit "${KAR_SIGNAL_FIX_PLAN_LIMIT:-80}"
+"""
+description = "Show specific send_user_command mappings missing id/signal/intent metadata."
 
 [[tasks]]
 name = "run"
