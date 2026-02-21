@@ -120,6 +120,17 @@ Status:
 
 Propagate `mapping_id` and `signal` metadata through `send_user_command` payloads so seq can ingest them directly as first-class labels.
 
+Status:
+- Implemented in config conversion path.
+- When `to` contains `send_user_command` with an object payload, kar now injects:
+  - `_kar_signal.rule_id`
+  - `_kar_signal.mapping_id`
+  - `_kar_signal.signal` (when provided in config)
+- Non-object payloads are left unchanged for compatibility.
+- Runtime typing latency impact is effectively zero:
+  - enrichment happens once during config->Karabiner JSON generation, not per keystroke dispatch
+  - no new shell/network calls were added in the key path
+
 ## Latency Guardrails
 
 Non-negotiables:

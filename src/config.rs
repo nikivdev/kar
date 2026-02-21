@@ -196,15 +196,15 @@ pub enum ToKey {
 pub fn to_karabiner_rules(config: &UserConfig) -> Result<Vec<Rule>> {
     let mut rules = Vec::new();
 
-    for user_rule in &config.rules {
-        let rule = convert_rule(user_rule, config)?;
+    for (rule_idx, user_rule) in config.rules.iter().enumerate() {
+        let rule = convert_rule(user_rule, config, rule_idx)?;
         rules.push(rule);
     }
 
     Ok(rules)
 }
 
-fn convert_rule(user_rule: &UserRule, config: &UserConfig) -> Result<Rule> {
+fn convert_rule(user_rule: &UserRule, config: &UserConfig, rule_idx: usize) -> Result<Rule> {
     let mut manipulators = Vec::new();
 
     // Check if this rule uses a simlayer
@@ -213,8 +213,15 @@ fn convert_rule(user_rule: &UserRule, config: &UserConfig) -> Result<Rule> {
         .as_ref()
         .and_then(|name| config.simlayers.get(name).map(|s| (name, s)));
 
-    for mapping in &user_rule.mappings {
-        let manips = convert_mapping(mapping, simlayer, &config.profile, &user_rule.condition)?;
+    for (mapping_idx, mapping) in user_rule.mappings.iter().enumerate() {
+        let signal_context = build_signal_context(user_rule, mapping, rule_idx, mapping_idx);
+        let manips = convert_mapping(
+            mapping,
+            simlayer,
+            &config.profile,
+            &user_rule.condition,
+            &signal_context,
+        )?;
         manipulators.extend(manips);
     }
 
@@ -237,6 +244,7 @@ fn convert_mapping(
     simlayer: Option<(&String, &Simlayer)>,
     profile: &ProfileSettings,
     condition: &Option<UserCondition>,
+    signal_context: &SignalContext,
 ) -> Result<Vec<Manipulator>> {
     let mut manipulators = Vec::new();
 
@@ -284,9 +292,15 @@ fn convert_mapping(
             manipulators.push(Manipulator {
                 manipulator_type: "basic".to_string(),
                 from,
-                to: Some(convert_to_events(&mapping.to)),
-                to_if_alone: mapping.to_if_alone.as_ref().map(|t| convert_to_events(t)),
-                to_if_held_down: mapping.to_if_held.as_ref().map(|t| convert_to_events(t)),
+                to: Some(convert_to_events(&mapping.to, Some(signal_context))),
+                to_if_alone: mapping
+                    .to_if_alone
+                    .as_ref()
+                    .map(|t| convert_to_events(t, Some(signal_context))),
+                to_if_held_down: mapping
+                    .to_if_held
+                    .as_ref()
+                    .map(|t| convert_to_events(t, Some(signal_context))),
                 to_after_key_up: None,
                 conditions: conditions.clone(),
                 parameters: Some(ManipulatorParameters {
@@ -338,9 +352,15 @@ fn convert_mapping(
                 manipulators.push(Manipulator {
                     manipulator_type: "basic".to_string(),
                     from,
-                    to: Some(convert_to_events(&mapping.to)),
-                    to_if_alone: mapping.to_if_alone.as_ref().map(|t| convert_to_events(t)),
-                    to_if_held_down: mapping.to_if_held.as_ref().map(|t| convert_to_events(t)),
+                    to: Some(convert_to_events(&mapping.to, Some(signal_context))),
+                    to_if_alone: mapping
+                        .to_if_alone
+                        .as_ref()
+                        .map(|t| convert_to_events(t, Some(signal_context))),
+                    to_if_held_down: mapping
+                        .to_if_held
+                        .as_ref()
+                        .map(|t| convert_to_events(t, Some(signal_context))),
                     to_after_key_up: None,
                     conditions: conditions.clone(),
                     parameters: None,
@@ -380,7 +400,7 @@ fn convert_mapping(
                         value: serde_json::Value::Number(1.into()),
                     },
                 })];
-                to_events.extend(convert_to_events(&mapping.to));
+                to_events.extend(convert_to_events(&mapping.to, Some(signal_context)));
 
                 manipulators.push(Manipulator {
                     manipulator_type: "basic".to_string(),
@@ -404,9 +424,15 @@ fn convert_mapping(
                 manipulators.push(Manipulator {
                     manipulator_type: "basic".to_string(),
                     from,
-                    to: Some(convert_to_events(&mapping.to)),
-                    to_if_alone: mapping.to_if_alone.as_ref().map(|t| convert_to_events(t)),
-                    to_if_held_down: mapping.to_if_held.as_ref().map(|t| convert_to_events(t)),
+                    to: Some(convert_to_events(&mapping.to, Some(signal_context))),
+                    to_if_alone: mapping
+                        .to_if_alone
+                        .as_ref()
+                        .map(|t| convert_to_events(t, Some(signal_context))),
+                    to_if_held_down: mapping
+                        .to_if_held
+                        .as_ref()
+                        .map(|t| convert_to_events(t, Some(signal_context))),
                     to_after_key_up: None,
                     conditions,
                     parameters: None,
@@ -418,7 +444,85 @@ fn convert_mapping(
     Ok(manipulators)
 }
 
-fn convert_to_events(to: &ToKey) -> Vec<ToEvent> {
+#[derive(Debug, Clone)]
+struct SignalContext {
+    rule_id: String,
+    mapping_id: String,
+    signal: Option<MappingSignal>,
+}
+
+fn slug_for_id(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut last_dash = false;
+    for c in input.chars() {
+        let lower = c.to_ascii_lowercase();
+        if lower.is_ascii_alphanumeric() {
+            out.push(lower);
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "untitled".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn build_signal_context(
+    user_rule: &UserRule,
+    mapping: &Mapping,
+    rule_idx: usize,
+    mapping_idx: usize,
+) -> SignalContext {
+    let fallback_rule_id = format!(
+        "rule.{}.{}",
+        rule_idx + 1,
+        slug_for_id(&user_rule.description)
+    );
+    let rule_id = user_rule.id.clone().unwrap_or(fallback_rule_id);
+    let mapping_id = mapping
+        .id
+        .clone()
+        .unwrap_or_else(|| format!("{}.map.{}", rule_id, mapping_idx + 1));
+    SignalContext {
+        rule_id,
+        mapping_id,
+        signal: mapping.signal.clone(),
+    }
+}
+
+fn inject_signal_payload(
+    payload: &serde_json::Value,
+    signal_context: &SignalContext,
+) -> serde_json::Value {
+    let serde_json::Value::Object(mut obj) = payload.clone() else {
+        return payload.clone();
+    };
+
+    let mut meta = serde_json::Map::new();
+    meta.insert(
+        "rule_id".to_string(),
+        serde_json::Value::String(signal_context.rule_id.clone()),
+    );
+    meta.insert(
+        "mapping_id".to_string(),
+        serde_json::Value::String(signal_context.mapping_id.clone()),
+    );
+
+    if let Some(signal) = signal_context.signal.clone() {
+        let signal_json = serde_json::to_value(signal).unwrap_or(serde_json::Value::Null);
+        meta.insert("signal".to_string(), signal_json);
+    }
+
+    obj.insert("_kar_signal".to_string(), serde_json::Value::Object(meta));
+    serde_json::Value::Object(obj)
+}
+
+fn convert_to_events(to: &ToKey, signal_context: Option<&SignalContext>) -> Vec<ToEvent> {
     match to {
         ToKey::Simple(key) => {
             vec![ToEvent::KeyCode(ToKeyCode {
@@ -447,9 +551,14 @@ fn convert_to_events(to: &ToKey) -> Vec<ToEvent> {
             })]
         }
         ToKey::SendUserCommand { send_user_command } => {
+            let payload = if let Some(ctx) = signal_context {
+                inject_signal_payload(&send_user_command.payload, ctx)
+            } else {
+                send_user_command.payload.clone()
+            };
             vec![ToEvent::SendUserCommand(ToSendUserCommand {
                 send_user_command: crate::karabiner::SendUserCommand {
-                    payload: send_user_command.payload.clone(),
+                    payload,
                     endpoint: send_user_command.endpoint.clone(),
                 },
             })]
@@ -471,7 +580,10 @@ fn convert_to_events(to: &ToKey) -> Vec<ToEvent> {
                 modifiers: None,
             })]
         }
-        ToKey::Multiple(keys) => keys.iter().flat_map(convert_to_events).collect(),
+        ToKey::Multiple(keys) => keys
+            .iter()
+            .flat_map(|k| convert_to_events(k, signal_context))
+            .collect(),
     }
 }
 
@@ -528,7 +640,10 @@ mod tests {
 
         let config: UserConfig = serde_json::from_str(json).expect("valid config");
         assert_eq!(config.rules[0].id.as_deref(), Some("rule.test"));
-        assert_eq!(config.rules[0].mappings[0].id.as_deref(), Some("map.open.test"));
+        assert_eq!(
+            config.rules[0].mappings[0].id.as_deref(),
+            Some("map.open.test")
+        );
         assert_eq!(
             config.rules[0].mappings[0]
                 .signal
@@ -544,5 +659,99 @@ mod tests {
         let rules = to_karabiner_rules(&config).expect("rules should build");
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].manipulators.len(), 1);
+    }
+
+    #[test]
+    fn send_user_command_payload_includes_signal_context() {
+        let json = r#"{
+          "rules": [
+            {
+              "id": "rule.nav",
+              "description": "Navigation",
+              "mappings": [
+                {
+                  "id": "map.nav.prompt",
+                  "from": "f",
+                  "to": {
+                    "send_user_command": {
+                      "payload": { "action": "predict_next" },
+                      "endpoint": "http://127.0.0.1:8780/v1"
+                    }
+                  },
+                  "signal": {
+                    "intent": "next_type_prediction",
+                    "tags": ["keyboard", "suggestion"],
+                    "criticality": "high"
+                  }
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let events = rules[0].manipulators[0]
+            .to
+            .as_ref()
+            .expect("to events should exist");
+        let ToEvent::SendUserCommand(send_user_command) = &events[0] else {
+            panic!("expected send_user_command event");
+        };
+        let payload = &send_user_command.send_user_command.payload;
+        let signal = payload
+            .get("_kar_signal")
+            .expect("signal context should be added");
+        assert_eq!(
+            signal.get("rule_id").and_then(|v| v.as_str()),
+            Some("rule.nav")
+        );
+        assert_eq!(
+            signal.get("mapping_id").and_then(|v| v.as_str()),
+            Some("map.nav.prompt")
+        );
+        assert_eq!(
+            signal
+                .get("signal")
+                .and_then(|v| v.get("intent"))
+                .and_then(|v| v.as_str()),
+            Some("next_type_prediction")
+        );
+    }
+
+    #[test]
+    fn send_user_command_non_object_payload_is_left_unchanged() {
+        let json = r#"{
+          "rules": [
+            {
+              "description": "Command passthrough",
+              "mappings": [
+                {
+                  "from": "g",
+                  "to": {
+                    "send_user_command": {
+                      "payload": "plain-string",
+                      "endpoint": "http://127.0.0.1:8780/v1"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let events = rules[0].manipulators[0]
+            .to
+            .as_ref()
+            .expect("to events should exist");
+        let ToEvent::SendUserCommand(send_user_command) = &events[0] else {
+            panic!("expected send_user_command event");
+        };
+        assert_eq!(
+            send_user_command.send_user_command.payload.as_str(),
+            Some("plain-string")
+        );
     }
 }
