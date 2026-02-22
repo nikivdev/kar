@@ -17,6 +17,8 @@ export default {
   simlayers: {
     "s-mode": { key: "s", threshold: 250 },
     "d-mode": { key: "d", threshold: 250 },
+    // Layer key with mandatory modifier + app-scoped condition:
+    // "w-mode": { key: "w", modifiers: "left_control", condition: { app: "^dev\\.zed\\.Zed$" } },
     // Hold-mode example (recommended for non-typing keys):
     // "escape-mode": { key: "escape", mode: "hold", alone: 120 },
   },

@@ -85,6 +85,18 @@ simlayers: {
 }
 ```
 
+Goku-style layer key modifiers and layer-level conditions are supported:
+
+```typescript
+simlayers: {
+  "w-mode": {
+    key: "w",
+    modifiers: "left_control",
+    condition: { app: "^dev\\.zed\\.Zed$" },
+  },
+}
+```
+
 Use hold mode only for non-typing keys (or tightly scoped conditions).  
 For letter keys in normal typing, prefer simultaneous mode to avoid eaten keys.
 

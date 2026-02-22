@@ -81,7 +81,13 @@ fn build(config_path: &PathBuf, dry_run: bool, profile: &str) -> Result<()> {
         .context("Could not find home directory")?
         .join(".config/karabiner/karabiner.json");
 
-    karabiner::update_profile(&karabiner_path, profile, rules, simple_mods, Some(parameters))?;
+    karabiner::update_profile(
+        &karabiner_path,
+        profile,
+        rules,
+        simple_mods,
+        Some(parameters),
+    )?;
 
     println!("Updated profile '{}'", profile);
     Ok(())

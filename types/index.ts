@@ -55,8 +55,18 @@ export interface ProfileSettings {
 export interface Simlayer {
   /** The key that activates this simlayer */
   key: KeyCode
+  /** Mandatory modifiers for the layer key (e.g. left_control + w) */
+  modifiers?: Modifier | Modifier[]
+  /** Optional modifiers accepted with the layer key */
+  optional?: Modifier[]
   /** Optional custom threshold in ms */
   threshold?: number
+  /** Optional custom to_if_alone timeout in ms for hold mode */
+  alone?: number
+  /** Optional activation mode (default: simultaneous) */
+  mode?: "hold" | "simultaneous"
+  /** Optional condition that gates this layer */
+  condition?: Condition
   /** Optional metadata/documentation field */
   note?: string
 }
@@ -97,6 +107,9 @@ export type ToKey =
 // Condition for when a rule applies
 export type Condition =
   | { app: string }
+  | { apps: string[] }
+  | { app_unless: string }
+  | { apps_unless: string[] }
   | { variable: string; value: number | boolean | string }
 
 export type SignalCriticality = "low" | "med" | "high"

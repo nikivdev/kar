@@ -12,7 +12,7 @@ export default {
   // Remap caps_lock to escape (no conditions)
   simple: [{ from: "caps_lock", to: "escape" }],
 
-  // Define simlayers (hold key to activate layer)
+  // Define simlayers (default mode is simultaneous chord: layer key + target key)
   simlayers: {
     "s-mode": { key: "s", threshold: 250 },
     "d-mode": { key: "d", threshold: 250 },

@@ -49,9 +49,15 @@ fn default_sim() -> u32 {
 pub struct Simlayer {
     pub key: String,
     #[serde(default)]
+    pub modifiers: Option<Modifiers>,
+    #[serde(default)]
+    pub optional: Option<Vec<String>>,
+    #[serde(default)]
     pub threshold: Option<u32>,
     #[serde(default)]
     pub alone: Option<u32>,
+    #[serde(default)]
+    pub condition: Option<UserCondition>,
     #[serde(default = "default_simlayer_mode")]
     pub mode: SimlayerMode,
     #[serde(default)]
@@ -240,15 +246,17 @@ fn convert_rule(user_rule: &UserRule, config: &UserConfig, rule_idx: usize) -> R
         .as_ref()
         .and_then(|name| config.simlayers.get(name).map(|s| (name, s)));
 
+    let base_conditions = merge_conditions(
+        build_base_conditions(&user_rule.condition),
+        simlayer.and_then(|(_, layer)| build_base_conditions(&layer.condition)),
+    );
+
     // Goku-style hold layer: press-and-hold layer key to activate variable, tap to emit key.
     if let Some((layer_name, layer)) = simlayer {
         if layer.mode == SimlayerMode::Hold {
             let from = FromEvent::KeyCode(FromKeyCode {
                 key_code: layer.key.clone(),
-                modifiers: Some(FromModifiers {
-                    optional: Some(vec!["any".to_string()]),
-                    mandatory: None,
-                }),
+                modifiers: Some(simlayer_from_modifiers(layer, true)),
             });
             let to = vec![ToEvent::SetVariable(ToSetVariable {
                 set_variable: SetVariable {
@@ -275,7 +283,7 @@ fn convert_rule(user_rule: &UserRule, config: &UserConfig, rule_idx: usize) -> R
                 to_if_alone: Some(to_if_alone),
                 to_if_held_down: None,
                 to_after_key_up: Some(to_after_key_up),
-                conditions: build_base_conditions(&user_rule.condition),
+                conditions: base_conditions.clone(),
                 parameters: Some(ManipulatorParameters {
                     simultaneous_threshold: None,
                     to_if_alone_timeout: Some(layer.alone.unwrap_or(config.profile.alone)),
@@ -290,7 +298,7 @@ fn convert_rule(user_rule: &UserRule, config: &UserConfig, rule_idx: usize) -> R
             mapping,
             simlayer,
             &config.profile,
-            &user_rule.condition,
+            base_conditions.clone(),
             &signal_context,
         )?;
         manipulators.extend(manips);
@@ -343,17 +351,46 @@ fn build_base_conditions(condition: &Option<UserCondition>) -> Option<Vec<Condit
     })
 }
 
+fn merge_conditions(
+    a: Option<Vec<Condition>>,
+    b: Option<Vec<Condition>>,
+) -> Option<Vec<Condition>> {
+    match (a, b) {
+        (None, None) => None,
+        (Some(conds), None) | (None, Some(conds)) => Some(conds),
+        (Some(mut a_conds), Some(mut b_conds)) => {
+            a_conds.append(&mut b_conds);
+            Some(a_conds)
+        }
+    }
+}
+
+fn simlayer_from_modifiers(layer: &Simlayer, allow_any_fallback: bool) -> FromModifiers {
+    let mandatory = layer.modifiers.as_ref().map(|m| m.to_vec());
+    let optional = layer.optional.clone().or_else(|| {
+        if mandatory.is_none() && allow_any_fallback {
+            Some(vec!["any".to_string()])
+        } else {
+            None
+        }
+    });
+    FromModifiers {
+        mandatory,
+        optional,
+    }
+}
+
 fn convert_mapping(
     mapping: &Mapping,
     simlayer: Option<(&String, &Simlayer)>,
     profile: &ProfileSettings,
-    condition: &Option<UserCondition>,
+    base_conditions: Option<Vec<Condition>>,
     signal_context: &SignalContext,
 ) -> Result<Vec<Manipulator>> {
     let mut manipulators = Vec::new();
 
     // Build base condition from user condition
-    let mut conditions: Option<Vec<Condition>> = build_base_conditions(condition);
+    let mut conditions: Option<Vec<Condition>> = base_conditions;
 
     match &mapping.from {
         FromKey::Simultaneous(keys) => {
@@ -481,10 +518,7 @@ fn convert_mapping(
                                 },
                             })]),
                         }),
-                        modifiers: Some(FromModifiers {
-                            optional: Some(vec!["any".to_string()]),
-                            mandatory: None,
-                        }),
+                        modifiers: Some(simlayer_from_modifiers(layer, true)),
                     });
 
                     let mut to_events = vec![ToEvent::SetVariable(ToSetVariable {
@@ -1136,6 +1170,74 @@ mod tests {
             .manipulators
             .iter()
             .any(|m| matches!(m.from, FromEvent::Simultaneous(_))));
+    }
+
+    #[test]
+    fn simlayer_with_modifiers_and_layer_condition_propagates_to_manipulators() {
+        let json = r#"{
+          "profile": { "alone": 90, "sim": 80 },
+          "simlayers": {
+            "w-mode": {
+              "key": "w",
+              "modifiers": "left_control",
+              "condition": { "app": "^dev\\.zed\\.Zed$" }
+            }
+          },
+          "rules": [
+            {
+              "description": "w sim + zed only",
+              "layer": "w-mode",
+              "condition": { "variable": "ctx", "value": 1 },
+              "mappings": [
+                { "from": "e", "to": "tab" }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].manipulators.len(), 2);
+
+        let layer_mapping = &rules[0].manipulators[0];
+        let conds = layer_mapping.conditions.as_ref().expect("layer conditions");
+        assert!(conds.iter().any(|c| {
+            matches!(
+                c,
+                Condition::VariableIf { name, value } if name == "ctx" && value.as_i64() == Some(1)
+            )
+        }));
+        assert!(conds.iter().any(|c| {
+            matches!(
+                c,
+                Condition::FrontmostAppIf { bundle_identifiers, .. }
+                if bundle_identifiers
+                    .as_ref()
+                    .is_some_and(|v| v.iter().any(|s| s == "^dev\\.zed\\.Zed$"))
+            )
+        }));
+        assert!(conds.iter().any(|c| {
+            matches!(
+                c,
+                Condition::VariableIf { name, value } if name == "w-mode" && value.as_i64() == Some(1)
+            )
+        }));
+
+        let sim = rules[0]
+            .manipulators
+            .iter()
+            .find(|m| matches!(m.from, FromEvent::Simultaneous(_)))
+            .expect("simultaneous trigger");
+        let FromEvent::Simultaneous(sim_from) = &sim.from else {
+            panic!("expected simultaneous from");
+        };
+        let mandatory = sim_from
+            .modifiers
+            .as_ref()
+            .and_then(|m| m.mandatory.as_ref())
+            .expect("mandatory modifiers");
+        assert_eq!(mandatory, &vec!["left_control".to_string()]);
     }
 
     #[test]

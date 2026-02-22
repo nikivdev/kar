@@ -65,6 +65,12 @@ fn build_once(config_path: &Path, karabiner_path: &Path, profile: &str) -> Resul
     let rules = config::to_karabiner_rules(&user_config)?;
     let simple_mods = config::to_simple_modifications(&user_config);
     let parameters = config::to_karabiner_parameters(&user_config.profile);
-    karabiner::update_profile(karabiner_path, profile, rules, simple_mods, Some(parameters))?;
+    karabiner::update_profile(
+        karabiner_path,
+        profile,
+        rules,
+        simple_mods,
+        Some(parameters),
+    )?;
     Ok(())
 }
