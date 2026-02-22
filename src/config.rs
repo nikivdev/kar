@@ -207,7 +207,10 @@ pub fn to_karabiner_rules(config: &UserConfig) -> Result<Vec<Rule>> {
 
     for (rule_idx, user_rule) in config.rules.iter().enumerate() {
         let rule = convert_rule(user_rule, config, rule_idx)?;
-        rules.push(rule);
+        // Karabiner rejects rules with empty manipulators.
+        if !rule.manipulators.is_empty() {
+            rules.push(rule);
+        }
     }
 
     Ok(rules)
