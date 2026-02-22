@@ -552,6 +552,101 @@ fn inject_signal_payload(
     serde_json::Value::Object(obj)
 }
 
+fn key_event(key_code: &str, modifiers: Option<Vec<&str>>) -> ToEvent {
+    ToEvent::KeyCode(ToKeyCode {
+        key_code: key_code.to_string(),
+        modifiers: modifiers.map(|mods| mods.into_iter().map(|m| m.to_string()).collect()),
+        lazy: None,
+        repeat: None,
+    })
+}
+
+fn native_key_for_char(ch: char) -> Option<ToEvent> {
+    // US-layout fast path for low-latency text entry.
+    if ch.is_ascii_lowercase() {
+        return Some(key_event(&ch.to_string(), None));
+    }
+    if ch.is_ascii_uppercase() {
+        return Some(key_event(
+            &ch.to_ascii_lowercase().to_string(),
+            Some(vec!["left_shift"]),
+        ));
+    }
+    if ch.is_ascii_digit() {
+        return Some(key_event(&ch.to_string(), None));
+    }
+
+    match ch {
+        ' ' => Some(key_event("spacebar", None)),
+        '\t' => Some(key_event("tab", None)),
+        '\n' => Some(key_event("return_or_enter", None)),
+        '-' => Some(key_event("hyphen", None)),
+        '_' => Some(key_event("hyphen", Some(vec!["left_shift"]))),
+        '=' => Some(key_event("equal_sign", None)),
+        '+' => Some(key_event("equal_sign", Some(vec!["left_shift"]))),
+        '[' => Some(key_event("open_bracket", None)),
+        '{' => Some(key_event("open_bracket", Some(vec!["left_shift"]))),
+        ']' => Some(key_event("close_bracket", None)),
+        '}' => Some(key_event("close_bracket", Some(vec!["left_shift"]))),
+        '\\' => Some(key_event("backslash", None)),
+        '|' => Some(key_event("backslash", Some(vec!["left_shift"]))),
+        ';' => Some(key_event("semicolon", None)),
+        ':' => Some(key_event("semicolon", Some(vec!["left_shift"]))),
+        '\'' => Some(key_event("quote", None)),
+        '"' => Some(key_event("quote", Some(vec!["left_shift"]))),
+        '`' => Some(key_event("grave_accent_and_tilde", None)),
+        '~' => Some(key_event("grave_accent_and_tilde", Some(vec!["left_shift"]))),
+        ',' => Some(key_event("comma", None)),
+        '<' => Some(key_event("comma", Some(vec!["left_shift"]))),
+        '.' => Some(key_event("period", None)),
+        '>' => Some(key_event("period", Some(vec!["left_shift"]))),
+        '/' => Some(key_event("slash", None)),
+        '?' => Some(key_event("slash", Some(vec!["left_shift"]))),
+        '!' => Some(key_event("1", Some(vec!["left_shift"]))),
+        '@' => Some(key_event("2", Some(vec!["left_shift"]))),
+        '#' => Some(key_event("3", Some(vec!["left_shift"]))),
+        '$' => Some(key_event("4", Some(vec!["left_shift"]))),
+        '%' => Some(key_event("5", Some(vec!["left_shift"]))),
+        '^' => Some(key_event("6", Some(vec!["left_shift"]))),
+        '&' => Some(key_event("7", Some(vec!["left_shift"]))),
+        '*' => Some(key_event("8", Some(vec!["left_shift"]))),
+        '(' => Some(key_event("9", Some(vec!["left_shift"]))),
+        ')' => Some(key_event("0", Some(vec!["left_shift"]))),
+        _ => None,
+    }
+}
+
+fn native_text_events_from_payload(payload: &serde_json::Value) -> Option<Vec<ToEvent>> {
+    let obj = payload.as_object()?;
+    let ty = obj.get("type")?.as_str()?;
+    if ty != "paste_text" && ty != "enter_text" {
+        return None;
+    }
+
+    let text = obj
+        .get("text")
+        .and_then(|v| v.as_str())
+        .or_else(|| obj.get("arg").and_then(|v| v.as_str()))
+        .or_else(|| obj.get("value").and_then(|v| v.as_str()))
+        .unwrap_or("");
+
+    if text.is_empty() {
+        if ty == "enter_text" {
+            return Some(vec![key_event("return_or_enter", None)]);
+        }
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(text.len() + if ty == "enter_text" { 1 } else { 0 });
+    for ch in text.chars() {
+        out.push(native_key_for_char(ch)?);
+    }
+    if ty == "enter_text" {
+        out.push(key_event("return_or_enter", None));
+    }
+    Some(out)
+}
+
 fn convert_to_events(to: &ToKey, signal_context: Option<&SignalContext>) -> Vec<ToEvent> {
     match to {
         ToKey::Simple(key) => {
@@ -586,6 +681,9 @@ fn convert_to_events(to: &ToKey, signal_context: Option<&SignalContext>) -> Vec<
             } else {
                 send_user_command.payload.clone()
             };
+            if let Some(native_events) = native_text_events_from_payload(&payload) {
+                return native_events;
+            }
             vec![ToEvent::SendUserCommand(ToSendUserCommand {
                 send_user_command: crate::karabiner::SendUserCommand {
                     payload,
@@ -783,6 +881,75 @@ mod tests {
             send_user_command.send_user_command.payload.as_str(),
             Some("plain-string")
         );
+    }
+
+    #[test]
+    fn paste_text_payload_compiles_to_native_key_events() {
+        let json = r#"{
+          "rules": [
+            {
+              "description": "Native paste text",
+              "mappings": [
+                {
+                  "from": "l",
+                  "to": {
+                    "send_user_command": {
+                      "payload": { "v": 1, "type": "paste_text", "text": "/prompts:review-push" }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let events = rules[0].manipulators[0]
+            .to
+            .as_ref()
+            .expect("to events should exist");
+        assert!(!events.is_empty());
+        // "/" then "p"
+        let ToEvent::KeyCode(first) = &events[0] else {
+            panic!("expected first native key event");
+        };
+        assert_eq!(first.key_code, "slash");
+        let ToEvent::KeyCode(second) = &events[1] else {
+            panic!("expected second native key event");
+        };
+        assert_eq!(second.key_code, "p");
+    }
+
+    #[test]
+    fn non_ascii_paste_text_payload_falls_back_to_send_user_command() {
+        let json = r#"{
+          "rules": [
+            {
+              "description": "Fallback paste text",
+              "mappings": [
+                {
+                  "from": "h",
+                  "to": {
+                    "send_user_command": {
+                      "payload": { "v": 1, "type": "paste_text", "text": "€" }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let events = rules[0].manipulators[0]
+            .to
+            .as_ref()
+            .expect("to events should exist");
+        let ToEvent::SendUserCommand(_) = &events[0] else {
+            panic!("expected send_user_command fallback");
+        };
     }
 
     #[test]
