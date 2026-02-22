@@ -13,15 +13,17 @@ export default {
   // Simple remappings (no conditions)
   simple: [{ from: "caps_lock", to: "escape" }],
 
-  // Simlayers: hold a key to activate a layer
+  // Simlayers: default is simultaneous chord mode (layer key + target key)
   simlayers: {
     "s-mode": { key: "s", threshold: 250 },
     "d-mode": { key: "d", threshold: 250 },
+    // Hold-mode example (recommended for non-typing keys):
+    // "escape-mode": { key: "escape", mode: "hold", alone: 120 },
   },
 
   rules: [
     // ===================
-    // Simlayer: hold s + press another key
+    // Simlayer: press s + another key
     // ===================
     {
       description: "s-mode (navigation)",

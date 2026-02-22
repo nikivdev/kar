@@ -110,6 +110,11 @@ pub struct ManipulatorParameters {
         skip_serializing_if = "Option::is_none"
     )]
     pub simultaneous_threshold: Option<u32>,
+    #[serde(
+        rename = "basic.to_if_alone_timeout_milliseconds",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub to_if_alone_timeout: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -262,9 +267,15 @@ pub struct MouseKey {
 #[serde(tag = "type")]
 pub enum Condition {
     #[serde(rename = "variable_if")]
-    VariableIf { name: String, value: serde_json::Value },
+    VariableIf {
+        name: String,
+        value: serde_json::Value,
+    },
     #[serde(rename = "variable_unless")]
-    VariableUnless { name: String, value: serde_json::Value },
+    VariableUnless {
+        name: String,
+        value: serde_json::Value,
+    },
     #[serde(rename = "frontmost_application_if")]
     FrontmostAppIf {
         #[serde(skip_serializing_if = "Option::is_none")]

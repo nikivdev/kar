@@ -10,13 +10,14 @@ which means:
 - regular typing gets blocked,
 - even system shortcuts like `Cmd+Tab` fail if `left_command` is a simlayer key.
 
-**Fix:** use **simultaneous chord** simlayers (Goku-style), not hold.
+**Fix:** use **simultaneous chord** simlayers (Goku-style) for typing keys.  
+`kar` now supports explicit hold-mode simlayers, but they should be limited to non-typing keys.
 
 ## Expected behavior (stable)
 
 - Only explicit `from: ["a","b"]` entries are true simultaneous shortcuts.
-- Simlayers are **chords**: press layer key + target key within threshold.
-- No `simlayer hold: ...` rules should exist in `karabiner.json`.
+- Simlayers are **chords** by default: press layer key + target key within threshold.
+- Hold-mode simlayers are optional and should be used only for non-typing keys.
 
 ## Quick checks
 
@@ -27,12 +28,9 @@ which means:
      jq '.profiles[] | {name, selected}' ~/.config/karabiner/karabiner.json
      ```
 
-2. **No hold simlayers**
-   - Ensure there are no `simlayer hold` rules:
-     ```
-     rg -n "simlayer hold" ~/.config/karabiner/karabiner.json
-     ```
-   - Output should be empty.
+2. **Hold simlayers are scoped**
+   - If you use `mode: "hold"`, keep those layers on non-typing keys (e.g. `escape`, modifiers).
+   - Avoid hold layers on letters used in normal typing.
 
 3. **Simlayers are chords**
    - Example: `s + l` should be a simultaneous mapping in `skey (essential)`.

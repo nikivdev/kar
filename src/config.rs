@@ -51,7 +51,22 @@ pub struct Simlayer {
     #[serde(default)]
     pub threshold: Option<u32>,
     #[serde(default)]
+    pub alone: Option<u32>,
+    #[serde(default = "default_simlayer_mode")]
+    pub mode: SimlayerMode,
+    #[serde(default)]
     pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SimlayerMode {
+    Hold,
+    Simultaneous,
+}
+
+fn default_simlayer_mode() -> SimlayerMode {
+    SimlayerMode::Simultaneous
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,6 +240,50 @@ fn convert_rule(user_rule: &UserRule, config: &UserConfig, rule_idx: usize) -> R
         .as_ref()
         .and_then(|name| config.simlayers.get(name).map(|s| (name, s)));
 
+    // Goku-style hold layer: press-and-hold layer key to activate variable, tap to emit key.
+    if let Some((layer_name, layer)) = simlayer {
+        if layer.mode == SimlayerMode::Hold {
+            let from = FromEvent::KeyCode(FromKeyCode {
+                key_code: layer.key.clone(),
+                modifiers: Some(FromModifiers {
+                    optional: Some(vec!["any".to_string()]),
+                    mandatory: None,
+                }),
+            });
+            let to = vec![ToEvent::SetVariable(ToSetVariable {
+                set_variable: SetVariable {
+                    name: layer_name.clone(),
+                    value: serde_json::Value::Number(1.into()),
+                },
+            })];
+            let to_after_key_up = vec![ToEvent::SetVariable(ToSetVariable {
+                set_variable: SetVariable {
+                    name: layer_name.clone(),
+                    value: serde_json::Value::Number(0.into()),
+                },
+            })];
+            let to_if_alone = vec![ToEvent::KeyCode(ToKeyCode {
+                key_code: layer.key.clone(),
+                modifiers: None,
+                lazy: None,
+                repeat: None,
+            })];
+            manipulators.push(Manipulator {
+                manipulator_type: "basic".to_string(),
+                from,
+                to: Some(to),
+                to_if_alone: Some(to_if_alone),
+                to_if_held_down: None,
+                to_after_key_up: Some(to_after_key_up),
+                conditions: build_base_conditions(&user_rule.condition),
+                parameters: Some(ManipulatorParameters {
+                    simultaneous_threshold: None,
+                    to_if_alone_timeout: Some(layer.alone.unwrap_or(config.profile.alone)),
+                }),
+            });
+        }
+    }
+
     for (mapping_idx, mapping) in user_rule.mappings.iter().enumerate() {
         let signal_context = build_signal_context(user_rule, mapping, rule_idx, mapping_idx);
         let manips = convert_mapping(
@@ -251,17 +310,8 @@ pub fn to_karabiner_parameters(profile: &ProfileSettings) -> Parameters {
     }
 }
 
-fn convert_mapping(
-    mapping: &Mapping,
-    simlayer: Option<(&String, &Simlayer)>,
-    profile: &ProfileSettings,
-    condition: &Option<UserCondition>,
-    signal_context: &SignalContext,
-) -> Result<Vec<Manipulator>> {
-    let mut manipulators = Vec::new();
-
-    // Build base condition from user condition
-    let mut conditions: Option<Vec<Condition>> = condition.as_ref().map(|c| match c {
+fn build_base_conditions(condition: &Option<UserCondition>) -> Option<Vec<Condition>> {
+    condition.as_ref().map(|c| match c {
         UserCondition::App { app } => {
             vec![Condition::FrontmostAppIf {
                 bundle_identifiers: Some(vec![app.clone()]),
@@ -286,13 +336,24 @@ fn convert_mapping(
                 file_paths: None,
             }]
         }
-        UserCondition::Variable { variable, value } => {
-            vec![Condition::VariableIf {
-                name: variable.clone(),
-                value: value.clone(),
-            }]
-        }
-    });
+        UserCondition::Variable { variable, value } => vec![Condition::VariableIf {
+            name: variable.clone(),
+            value: value.clone(),
+        }],
+    })
+}
+
+fn convert_mapping(
+    mapping: &Mapping,
+    simlayer: Option<(&String, &Simlayer)>,
+    profile: &ProfileSettings,
+    condition: &Option<UserCondition>,
+    signal_context: &SignalContext,
+) -> Result<Vec<Manipulator>> {
+    let mut manipulators = Vec::new();
+
+    // Build base condition from user condition
+    let mut conditions: Option<Vec<Condition>> = build_base_conditions(condition);
 
     match &mapping.from {
         FromKey::Simultaneous(keys) => {
@@ -335,6 +396,7 @@ fn convert_mapping(
                 conditions: conditions.clone(),
                 parameters: Some(ManipulatorParameters {
                     simultaneous_threshold: Some(profile.sim),
+                    to_if_alone_timeout: None,
                 }),
             });
         }
@@ -357,7 +419,7 @@ fn convert_mapping(
             };
 
             if let Some((layer_name, layer)) = simlayer {
-                // This is a simlayer mapping - create simultaneous triggers
+                // This is a layer-backed mapping.
                 let var_name = layer_name.clone();
 
                 // Add layer variable condition
@@ -396,54 +458,57 @@ fn convert_mapping(
                     parameters: None,
                 });
 
-                // Simultaneous trigger (layer key + this key activates layer)
-                let sim_from = FromEvent::Simultaneous(FromSimultaneous {
-                    simultaneous: vec![
-                        SimultaneousKey {
-                            key_code: layer.key.clone(),
-                        },
-                        SimultaneousKey {
-                            key_code: key_code.clone(),
-                        },
-                    ],
-                    simultaneous_options: Some(SimultaneousOptions {
-                        detect_key_down_uninterruptedly: Some(true),
-                        key_down_order: Some("strict".to_string()),
-                        key_up_order: Some("strict_inverse".to_string()),
-                        key_up_when: Some("any".to_string()),
-                        to_after_key_up: Some(vec![ToEvent::SetVariable(ToSetVariable {
-                            set_variable: SetVariable {
-                                name: var_name.clone(),
-                                value: serde_json::Value::Number(0.into()),
+                if layer.mode == SimlayerMode::Simultaneous {
+                    // Simultaneous trigger (layer key + this key activates layer)
+                    let sim_from = FromEvent::Simultaneous(FromSimultaneous {
+                        simultaneous: vec![
+                            SimultaneousKey {
+                                key_code: layer.key.clone(),
                             },
-                        })]),
-                    }),
-                    modifiers: Some(FromModifiers {
-                        optional: Some(vec!["any".to_string()]),
-                        mandatory: None,
-                    }),
-                });
+                            SimultaneousKey {
+                                key_code: key_code.clone(),
+                            },
+                        ],
+                        simultaneous_options: Some(SimultaneousOptions {
+                            detect_key_down_uninterruptedly: Some(true),
+                            key_down_order: Some("strict".to_string()),
+                            key_up_order: Some("strict_inverse".to_string()),
+                            key_up_when: Some("any".to_string()),
+                            to_after_key_up: Some(vec![ToEvent::SetVariable(ToSetVariable {
+                                set_variable: SetVariable {
+                                    name: var_name.clone(),
+                                    value: serde_json::Value::Number(0.into()),
+                                },
+                            })]),
+                        }),
+                        modifiers: Some(FromModifiers {
+                            optional: Some(vec!["any".to_string()]),
+                            mandatory: None,
+                        }),
+                    });
 
-                let mut to_events = vec![ToEvent::SetVariable(ToSetVariable {
-                    set_variable: SetVariable {
-                        name: var_name,
-                        value: serde_json::Value::Number(1.into()),
-                    },
-                })];
-                to_events.extend(convert_to_events(&mapping.to, Some(signal_context)));
+                    let mut to_events = vec![ToEvent::SetVariable(ToSetVariable {
+                        set_variable: SetVariable {
+                            name: var_name,
+                            value: serde_json::Value::Number(1.into()),
+                        },
+                    })];
+                    to_events.extend(convert_to_events(&mapping.to, Some(signal_context)));
 
-                manipulators.push(Manipulator {
-                    manipulator_type: "basic".to_string(),
-                    from: sim_from,
-                    to: Some(to_events),
-                    to_if_alone: None,
-                    to_if_held_down: None,
-                    to_after_key_up: None,
-                    conditions: None,
-                    parameters: Some(ManipulatorParameters {
-                        simultaneous_threshold: Some(layer.threshold.unwrap_or(profile.sim)),
-                    }),
-                });
+                    manipulators.push(Manipulator {
+                        manipulator_type: "basic".to_string(),
+                        from: sim_from,
+                        to: Some(to_events),
+                        to_if_alone: None,
+                        to_if_held_down: None,
+                        to_after_key_up: None,
+                        conditions: None,
+                        parameters: Some(ManipulatorParameters {
+                            simultaneous_threshold: Some(layer.threshold.unwrap_or(profile.sim)),
+                            to_if_alone_timeout: None,
+                        }),
+                    });
+                }
             } else {
                 // Simple mapping without layer
                 let from = FromEvent::KeyCode(FromKeyCode {
@@ -595,7 +660,10 @@ fn native_key_for_char(ch: char) -> Option<ToEvent> {
         '\'' => Some(key_event("quote", None)),
         '"' => Some(key_event("quote", Some(vec!["left_shift"]))),
         '`' => Some(key_event("grave_accent_and_tilde", None)),
-        '~' => Some(key_event("grave_accent_and_tilde", Some(vec!["left_shift"]))),
+        '~' => Some(key_event(
+            "grave_accent_and_tilde",
+            Some(vec!["left_shift"]),
+        )),
         ',' => Some(key_event("comma", None)),
         '<' => Some(key_event("comma", Some(vec!["left_shift"]))),
         '.' => Some(key_event("period", None)),
@@ -982,6 +1050,95 @@ mod tests {
     }
 
     #[test]
+    fn simlayer_hold_mode_emits_layer_gate_and_conditioned_mapping() {
+        let json = r#"{
+          "profile": { "alone": 90, "sim": 80 },
+          "simlayers": {
+            "r-mode": { "key": "r", "mode": "hold", "alone": 120 }
+          },
+          "rules": [
+            {
+              "description": "r hold",
+              "layer": "r-mode",
+              "mappings": [
+                { "from": "l", "to": "escape" }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].manipulators.len(), 2);
+
+        // Hold-gate manipulator
+        let gate = &rules[0].manipulators[0];
+        let FromEvent::KeyCode(from_gate) = &gate.from else {
+            panic!("expected key gate");
+        };
+        assert_eq!(from_gate.key_code, "r");
+        let gate_to_if_alone = gate.to_if_alone.as_ref().expect("gate to_if_alone");
+        let ToEvent::KeyCode(key) = &gate_to_if_alone[0] else {
+            panic!("expected keycode to_if_alone");
+        };
+        assert_eq!(key.key_code, "r");
+        assert_eq!(
+            gate.parameters.as_ref().and_then(|p| p.to_if_alone_timeout),
+            Some(120)
+        );
+
+        // Layer-conditioned mapping (no simultaneous trigger in hold mode)
+        let map = &rules[0].manipulators[1];
+        let FromEvent::KeyCode(from_map) = &map.from else {
+            panic!("expected key mapping");
+        };
+        assert_eq!(from_map.key_code, "l");
+        let has_layer_cond = map.conditions.as_ref().is_some_and(|conds| {
+            conds.iter().any(|c| {
+                matches!(
+                    c,
+                    Condition::VariableIf { name, value }
+                    if name == "r-mode" && value.as_i64() == Some(1)
+                )
+            })
+        });
+        assert!(has_layer_cond, "mapping must be gated by r-mode variable");
+        assert!(rules[0]
+            .manipulators
+            .iter()
+            .all(|m| !matches!(m.from, FromEvent::Simultaneous(_))));
+    }
+
+    #[test]
+    fn simlayer_default_mode_remains_simultaneous() {
+        let json = r#"{
+          "profile": { "alone": 90, "sim": 80 },
+          "simlayers": {
+            "r-mode": { "key": "r", "threshold": 250 }
+          },
+          "rules": [
+            {
+              "description": "r sim",
+              "layer": "r-mode",
+              "mappings": [
+                { "from": "l", "to": "escape" }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].manipulators.len(), 2);
+        assert!(rules[0]
+            .manipulators
+            .iter()
+            .any(|m| matches!(m.from, FromEvent::Simultaneous(_))));
+    }
+
+    #[test]
     fn apps_condition_maps_to_frontmost_application_if() {
         let json = r#"{
           "rules": [
@@ -1009,10 +1166,7 @@ mod tests {
         else {
             panic!("expected frontmost_application_if");
         };
-        assert_eq!(
-            bundle_identifiers.as_ref().expect("bundle ids").len(),
-            2
-        );
+        assert_eq!(bundle_identifiers.as_ref().expect("bundle ids").len(), 2);
     }
 
     #[test]

@@ -67,6 +67,27 @@ Single: `"left_command"`, `"left_shift"`, `"left_option"`, `"left_control"`
 
 Multiple: `["left_command", "left_shift"]`
 
+## Simlayers
+
+Default behavior is **simultaneous chord mode** (Goku-style): press layer key + target key.
+
+```typescript
+simlayers: {
+  "s-mode": { key: "s", threshold: 250 }, // default mode: "simultaneous"
+}
+```
+
+Optional **hold mode** is available per layer:
+
+```typescript
+simlayers: {
+  "caps-mode": { key: "escape", mode: "hold", alone: 120 },
+}
+```
+
+Use hold mode only for non-typing keys (or tightly scoped conditions).  
+For letter keys in normal typing, prefer simultaneous mode to avoid eaten keys.
+
 ## Key Mapping Examples
 
 ```typescript
