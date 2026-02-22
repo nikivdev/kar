@@ -198,6 +198,24 @@ Use `from: { double_tap: ... }` on a mapping:
 
 This compiles into the standard Karabiner delayed-action variable pattern.
 
+## Duo Layer
+
+Use `duoLayer(...)` helper to create a two-key layer trigger:
+
+```typescript
+const navDuo = duoLayer(
+  "nav-duo",
+  ["f", "d"],
+  [
+    { from: "h", to: "left_arrow" },
+    { from: "l", to: "right_arrow" },
+  ],
+  { thresholdMs: 180, sticky: false, escape: ["escape"] },
+)
+```
+
+Then include `navDuo` in `rules`.
+
 ## Imports
 
 Import existing rule sets from JSON files or other Karabiner profiles:

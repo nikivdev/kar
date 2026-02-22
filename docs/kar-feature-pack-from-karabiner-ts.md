@@ -125,6 +125,7 @@ Latency behavior for text helpers:
 ## 7) Utility helpers
 
 - `doubleTap(...)` (from-key helper)
+- `duoLayer(...)` (two-key layer helper)
 - `withMapper(...)`
 - `withCondition(...)`
 - `importJson(...)`
@@ -140,6 +141,7 @@ import {
   importJson,
   importProfile,
   doubleTap,
+  duoLayer,
 } from "../types/index.ts"
 
 export default {
@@ -161,6 +163,12 @@ export default {
   },
 
   rules: [
+    duoLayer(
+      "nav-duo",
+      ["f", "d"],
+      [{ from: "h", to: "left_arrow" }, { from: "l", to: "right_arrow" }],
+      { thresholdMs: 180, sticky: false, escape: ["escape"] },
+    ),
     {
       description: "Leader nav",
       layer: "r-mode",

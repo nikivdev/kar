@@ -125,6 +125,11 @@ export interface InputSource {
   input_mode_id?: string
 }
 
+export interface SetVariable {
+  name: string
+  value: number | boolean | string
+}
+
 export interface DelayedAction {
   invoked: ToKey
   canceled: ToKey
@@ -147,6 +152,7 @@ export type ToKey =
   | { key: KeyCode; modifiers?: Modifier | Modifier[] }
   | { shell: string }
   | { socket_command: SocketCommand }
+  | { set_variable: SetVariable }
   | { send_user_command: SendUserCommand }
   | { mouse_key: MouseKey }
   | { pointing_button: PointingButton }
@@ -295,6 +301,10 @@ export function seqOpenAppToggle(app: string, endpoint = "/tmp/seqd.sock"): { so
   return socketCommand(endpoint, `OPEN_APP_TOGGLE ${app}`)
 }
 
+export function toSetVar(name: string, value: number | boolean | string): { set_variable: SetVariable } {
+  return { set_variable: { name, value } }
+}
+
 // Declare a double-tap from-key object.
 export function doubleTap(
   key: KeyCode,
@@ -324,6 +334,47 @@ export function withCondition(condition: Condition, mappings: readonly Mapping[]
     ...m,
     condition: m.condition ?? condition,
   }))
+}
+
+// Build a duo-layer rule using existing schema primitives.
+// Trigger: simultaneous key pair -> set layer variable
+// Layer mappings: gated by variable condition
+export function duoLayer(
+  layerName: string,
+  keys: readonly [KeyCode, KeyCode],
+  mappings: readonly Mapping[],
+  options?: {
+    thresholdMs?: number
+    sticky?: boolean
+    escape?: KeyCode[]
+  },
+): Rule {
+  const [k1, k2] = keys
+  const isSticky = options?.sticky ?? false
+  const layerCondition: Condition = { variable: layerName, value: 1 }
+  const off = toSetVar(layerName, 0)
+  const layeredMappings = withCondition(layerCondition, mappings).map((m) => {
+    if (isSticky) return m
+    const to = Array.isArray(m.to) ? [...m.to, off] : [m.to, off]
+    return { ...m, to }
+  })
+  const escapeMappings = (options?.escape ?? []).map((key): Mapping => ({
+    from: key,
+    to: off,
+    condition: layerCondition,
+  }))
+  const trigger: Mapping = {
+    from: [k1, k2],
+    to: toSetVar(layerName, 1),
+    to_after_key_up: off,
+    ...(options?.thresholdMs
+      ? { parameters: { simultaneous_threshold_ms: options.thresholdMs } }
+      : {}),
+  }
+  return {
+    description: `duo-layer ${layerName}`,
+    mappings: [trigger, ...layeredMappings, ...escapeMappings],
+  }
 }
 
 export function km(macroName: string): { shell: string } {

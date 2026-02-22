@@ -56,17 +56,19 @@ From `karabiner.ts`, these give the best value/risk ratio for this repo:
 - low-latency seq action wiring (performance)
 - no extra runtime daemons/processes (stability)
 
-## What We Did Not Port Yet
+## Status Update
 
-Still useful from `karabiner.ts`, but intentionally postponed:
+Previously-postponed items are now implemented in `kar`:
 
-- builder-style API (`rule().manipulators().condition()` etc.)
-- `double_tap` abstraction
-- delayed/leader/duo-layer abstractions
-- import helpers (`importJson`, `importProfile`)
-- generalized mapper utilities (`withMapper`, `withCondition`, `withModifier`)
+- `double_tap` abstraction (`from: { double_tap: ... }`)
+- delayed and leader semantics for hold simlayers (`delay_ms`, `leader`)
+- import helpers (`imports: [importJson(...), importProfile(...)]`)
+- utility helpers (`withMapper`, `withCondition`)
+- duo-layer helper (`duoLayer(...)`)
 
-These are good candidates, but each adds API surface and migration complexity.
+For the full behavior and examples, see:
+
+- `docs/kar-feature-pack-from-karabiner-ts.md`
 
 ## Verification
 

@@ -362,6 +362,9 @@ pub enum ToKey {
     SocketCommand {
         socket_command: SocketCommand,
     },
+    SetVariable {
+        set_variable: SetVariableSpec,
+    },
     SendUserCommand {
         send_user_command: SendUserCommand,
     },
@@ -372,6 +375,12 @@ pub enum ToKey {
         pointing_button: String,
     },
     Multiple(Vec<ToKey>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetVariableSpec {
+    pub name: String,
+    pub value: serde_json::Value,
 }
 
 /// Convert user config to Karabiner rules
@@ -1354,6 +1363,14 @@ fn convert_to_events(to: &ToKey, signal_context: Option<&SignalContext>) -> Vec<
                 socket_command: socket_command.clone(),
             })]
         }
+        ToKey::SetVariable { set_variable } => {
+            vec![ToEvent::SetVariable(ToSetVariable {
+                set_variable: SetVariable {
+                    name: set_variable.name.clone(),
+                    value: set_variable.value.clone(),
+                },
+            })]
+        }
         ToKey::SendUserCommand { send_user_command } => {
             let payload = if let Some(ctx) = signal_context {
                 inject_signal_payload(&send_user_command.payload, ctx)
@@ -2140,5 +2157,70 @@ mod tests {
         assert_eq!(loaded[0].description, "imported");
 
         let _ = std::fs::remove_file(import_path);
+    }
+
+    #[test]
+    fn import_profile_rules_are_loaded() {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let karabiner_path = std::env::temp_dir().join(format!("kar_profile_import_{ts}.json"));
+        let content = r#"{
+          "profiles": [
+            {
+              "name": "src",
+              "selected": false,
+              "complex_modifications": {
+                "rules": [
+                  {
+                    "description": "from profile",
+                    "manipulators": [
+                      { "type": "basic", "from": { "key_code": "x" }, "to": [{ "key_code": "y" }] }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }"#;
+        std::fs::write(&karabiner_path, content).expect("write karabiner");
+
+        let cfg_json = format!(
+            r#"{{
+              "imports": [{{ "import_profile": "src", "karabiner_json": "{}" }}],
+              "rules": []
+            }}"#,
+            karabiner_path.display()
+        );
+        let config: UserConfig = serde_json::from_str(&cfg_json).expect("valid config");
+        let config_path = std::env::temp_dir().join(format!("kar_cfg_profile_{ts}.ts"));
+        let loaded =
+            load_imported_rules(&config, &config_path, &karabiner_path).expect("load profile");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].description, "from profile");
+
+        let _ = std::fs::remove_file(karabiner_path);
+    }
+
+    #[test]
+    fn to_key_set_variable_compiles_to_set_variable_event() {
+        let json = r#"{
+          "rules": [
+            {
+              "description": "set var",
+              "mappings": [
+                { "from": "a", "to": { "set_variable": { "name": "x", "value": 1 } } }
+              ]
+            }
+          ]
+        }"#;
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let events = rules[0].manipulators[0].to.as_ref().expect("to events");
+        let ToEvent::SetVariable(set_var) = &events[0] else {
+            panic!("expected set_variable event");
+        };
+        assert_eq!(set_var.set_variable.name, "x");
     }
 }
