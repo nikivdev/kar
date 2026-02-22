@@ -617,6 +617,7 @@ fn native_key_for_char(ch: char) -> Option<ToEvent> {
 }
 
 fn native_text_events_from_payload(payload: &serde_json::Value) -> Option<Vec<ToEvent>> {
+    const MAX_NATIVE_TEXT_CHARS: usize = 96;
     let obj = payload.as_object()?;
     let ty = obj.get("type")?.as_str()?;
     if ty != "paste_text" && ty != "enter_text" {
@@ -629,6 +630,12 @@ fn native_text_events_from_payload(payload: &serde_json::Value) -> Option<Vec<To
         .or_else(|| obj.get("arg").and_then(|v| v.as_str()))
         .or_else(|| obj.get("value").and_then(|v| v.as_str()))
         .unwrap_or("");
+
+    // Keep native expansion for short snippets only.
+    // Long text is more reliable via clipboard-backed paste/enter fallback.
+    if text.chars().count() > MAX_NATIVE_TEXT_CHARS {
+        return None;
+    }
 
     if text.is_empty() {
         if ty == "enter_text" {
@@ -949,6 +956,28 @@ mod tests {
             .expect("to events should exist");
         let ToEvent::SendUserCommand(_) = &events[0] else {
             panic!("expected send_user_command fallback");
+        };
+    }
+
+    #[test]
+    fn long_ascii_paste_text_payload_falls_back_to_send_user_command() {
+        let long_text = "a".repeat(200);
+        let payload = serde_json::json!({
+            "v": 1,
+            "type": "paste_text",
+            "text": long_text,
+        });
+        let event = convert_to_events(
+            &ToKey::SendUserCommand {
+                send_user_command: SendUserCommand {
+                    payload,
+                    endpoint: None,
+                },
+            },
+            None,
+        );
+        let ToEvent::SendUserCommand(_) = &event[0] else {
+            panic!("expected send_user_command fallback for long text");
         };
     }
 
