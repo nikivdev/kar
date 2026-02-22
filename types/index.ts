@@ -94,12 +94,34 @@ export interface SocketCommand {
   command: string
 }
 
+export interface SendUserCommand {
+  payload: unknown
+  endpoint?: string
+}
+
+export interface DeviceIdentifier {
+  vendor_id?: number
+  product_id?: number
+  location_id?: number
+  is_keyboard?: boolean
+  is_pointing_device?: boolean
+  is_game_pad?: boolean
+  is_consumer?: boolean
+}
+
+export interface InputSource {
+  language?: string
+  input_source_id?: string
+  input_mode_id?: string
+}
+
 // To key specification
 export type ToKey =
   | KeyCode
   | { key: KeyCode; modifiers?: Modifier | Modifier[] }
   | { shell: string }
   | { socket_command: SocketCommand }
+  | { send_user_command: SendUserCommand }
   | { mouse_key: MouseKey }
   | { pointing_button: PointingButton }
   | ToKey[] // Multiple actions
@@ -111,6 +133,23 @@ export type Condition =
   | { app_unless: string }
   | { apps_unless: string[] }
   | { variable: string; value: number | boolean | string }
+  | { variable_unless: string; value: number | boolean | string }
+  | { device: DeviceIdentifier }
+  | { devices: DeviceIdentifier[] }
+  | { device_unless: DeviceIdentifier }
+  | { devices_unless: DeviceIdentifier[] }
+  | { device_exists: DeviceIdentifier }
+  | { devices_exists: DeviceIdentifier[] }
+  | { device_exists_unless: DeviceIdentifier }
+  | { devices_exists_unless: DeviceIdentifier[] }
+  | { input_source: InputSource }
+  | { input_sources: InputSource[] }
+  | { input_source_unless: InputSource }
+  | { input_sources_unless: InputSource[] }
+  | { keyboard_type: string }
+  | { keyboard_types: string[] }
+  | { keyboard_type_unless: string }
+  | { keyboard_types_unless: string[] }
 
 export type SignalCriticality = "low" | "med" | "high"
 
@@ -181,6 +220,39 @@ export function socketCommand(endpoint: string, command: string): { socket_comma
 
 export function seqSocket(macroName: string, endpoint = "/tmp/seqd.sock"): { socket_command: SocketCommand } {
   return socketCommand(endpoint, `RUN ${macroName}`)
+}
+
+export function sendUserCommand(payload: unknown, endpoint?: string): { send_user_command: SendUserCommand } {
+  return { send_user_command: { payload, endpoint } }
+}
+
+function seqPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  return payload.v === 1 ? payload : { v: 1, ...payload }
+}
+
+// Zero-latency-ish text path:
+// - short ASCII snippets compile to native key events in kar compiler (no bridge hop)
+// - non-ASCII / long text automatically falls back to seq bridge send_user_command path
+export function seqPasteText(text: string, endpoint?: string): { send_user_command: SendUserCommand } {
+  return sendUserCommand(seqPayload({ type: "paste_text", text }), endpoint)
+}
+
+export function seqEnterText(text: string, endpoint?: string): { send_user_command: SendUserCommand } {
+  return sendUserCommand(seqPayload({ type: "enter_text", text }), endpoint)
+}
+
+// Explicit "type sequence" helper using the same fast/fallback behavior as seqPasteText.
+export function typeSequence(text: string, endpoint?: string): { send_user_command: SendUserCommand } {
+  return seqPasteText(text, endpoint)
+}
+
+// Direct seqd socket commands (no shell process spawn).
+export function seqOpenApp(app: string, endpoint = "/tmp/seqd.sock"): { socket_command: SocketCommand } {
+  return socketCommand(endpoint, `OPEN_APP ${app}`)
+}
+
+export function seqOpenAppToggle(app: string, endpoint = "/tmp/seqd.sock"): { socket_command: SocketCommand } {
+  return socketCommand(endpoint, `OPEN_APP_TOGGLE ${app}`)
 }
 
 export function km(macroName: string): { shell: string } {

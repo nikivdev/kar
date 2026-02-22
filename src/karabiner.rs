@@ -264,6 +264,34 @@ pub struct MouseKey {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceIdentifier {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vendor_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_keyboard: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_pointing_device: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_game_pad: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_consumer: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputSource {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_source_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_mode_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Condition {
     #[serde(rename = "variable_if")]
@@ -290,6 +318,22 @@ pub enum Condition {
         #[serde(skip_serializing_if = "Option::is_none")]
         file_paths: Option<Vec<String>>,
     },
+    #[serde(rename = "device_if")]
+    DeviceIf { identifiers: Vec<DeviceIdentifier> },
+    #[serde(rename = "device_unless")]
+    DeviceUnless { identifiers: Vec<DeviceIdentifier> },
+    #[serde(rename = "device_exists_if")]
+    DeviceExistsIf { identifiers: Vec<DeviceIdentifier> },
+    #[serde(rename = "device_exists_unless")]
+    DeviceExistsUnless { identifiers: Vec<DeviceIdentifier> },
+    #[serde(rename = "keyboard_type_if")]
+    KeyboardTypeIf { keyboard_types: Vec<String> },
+    #[serde(rename = "keyboard_type_unless")]
+    KeyboardTypeUnless { keyboard_types: Vec<String> },
+    #[serde(rename = "input_source_if")]
+    InputSourceIf { input_sources: Vec<InputSource> },
+    #[serde(rename = "input_source_unless")]
+    InputSourceUnless { input_sources: Vec<InputSource> },
 }
 
 /// Update a profile in karabiner.json with new rules

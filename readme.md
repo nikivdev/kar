@@ -137,7 +137,24 @@ For letter keys in normal typing, prefer simultaneous mode to avoid eaten keys.
   to: open("https://arc.net"),
   signal: { intent: "open_arc_home", tags: ["browser", "nav"], criticality: "low" },
 }
+
+// Seq low-latency bindings (prefer socket/send_user_command over shell):
+{ from: "o", to: seqOpenApp("Arc") }                  // socket_command -> seqd
+{ from: "p", to: seqOpenAppToggle("Arc") }            // socket_command -> seqd
+{ from: "y", to: seqPasteText("/prompts:review-push") } // native key events fast-path for short ASCII
+{ from: "u", to: seqEnterText("what to run next?") }  // same + enter
 ```
+
+## Condition Coverage
+
+Rule/layer conditions currently support:
+
+- app scopes: `app`, `apps`, `app_unless`, `apps_unless`
+- variable scopes: `variable`, `variable_unless`
+- device scopes: `device`, `devices`, `device_unless`, `devices_unless`
+- device existence: `device_exists`, `devices_exists`, `device_exists_unless`, `devices_exists_unless`
+- input source: `input_source`, `input_sources`, `input_source_unless`, `input_sources_unless`
+- keyboard type: `keyboard_type`, `keyboard_types`, `keyboard_type_unless`, `keyboard_types_unless`
 
 ## Contributing
 

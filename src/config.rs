@@ -1,9 +1,9 @@
 use crate::karabiner::{
-    Condition, FromEvent, FromKeyCode, FromModifiers, FromSimultaneous, Manipulator,
-    ManipulatorParameters, Parameters, Rule, SetVariable, SimpleModificationEntry,
-    SimpleModificationKey, SimultaneousKey, SimultaneousOptions, SocketCommand, ToEvent, ToKeyCode,
-    ToMouseKey, ToPointingButton, ToSendUserCommand, ToSetVariable, ToShellCommand,
-    ToSocketCommand,
+    Condition, DeviceIdentifier, FromEvent, FromKeyCode, FromModifiers, FromSimultaneous,
+    InputSource, Manipulator, ManipulatorParameters, Parameters, Rule, SetVariable,
+    SimpleModificationEntry, SimpleModificationKey, SimultaneousKey, SimultaneousOptions,
+    SocketCommand, ToEvent, ToKeyCode, ToMouseKey, ToPointingButton, ToSendUserCommand,
+    ToSetVariable, ToShellCommand, ToSocketCommand,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -104,10 +104,90 @@ pub enum UserCondition {
     AppsUnless {
         apps_unless: Vec<String>,
     },
+    Device {
+        device: UserDeviceIdentifier,
+    },
+    Devices {
+        devices: Vec<UserDeviceIdentifier>,
+    },
+    DeviceUnless {
+        device_unless: UserDeviceIdentifier,
+    },
+    DevicesUnless {
+        devices_unless: Vec<UserDeviceIdentifier>,
+    },
+    DeviceExists {
+        device_exists: UserDeviceIdentifier,
+    },
+    DevicesExists {
+        devices_exists: Vec<UserDeviceIdentifier>,
+    },
+    DeviceExistsUnless {
+        device_exists_unless: UserDeviceIdentifier,
+    },
+    DevicesExistsUnless {
+        devices_exists_unless: Vec<UserDeviceIdentifier>,
+    },
+    InputSource {
+        input_source: UserInputSource,
+    },
+    InputSources {
+        input_sources: Vec<UserInputSource>,
+    },
+    InputSourceUnless {
+        input_source_unless: UserInputSource,
+    },
+    InputSourcesUnless {
+        input_sources_unless: Vec<UserInputSource>,
+    },
+    KeyboardType {
+        keyboard_type: String,
+    },
+    KeyboardTypes {
+        keyboard_types: Vec<String>,
+    },
+    KeyboardTypeUnless {
+        keyboard_type_unless: String,
+    },
+    KeyboardTypesUnless {
+        keyboard_types_unless: Vec<String>,
+    },
     Variable {
         variable: String,
         value: serde_json::Value,
     },
+    VariableUnless {
+        variable_unless: String,
+        value: serde_json::Value,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserDeviceIdentifier {
+    #[serde(default)]
+    pub vendor_id: Option<u32>,
+    #[serde(default)]
+    pub product_id: Option<u32>,
+    #[serde(default)]
+    pub location_id: Option<u32>,
+    #[serde(default)]
+    pub is_keyboard: Option<bool>,
+    #[serde(default)]
+    pub is_pointing_device: Option<bool>,
+    #[serde(default)]
+    pub is_game_pad: Option<bool>,
+    #[serde(default)]
+    pub is_consumer: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserInputSource {
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub input_source_id: Option<String>,
+    #[serde(default)]
+    pub input_mode_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -344,11 +424,101 @@ fn build_base_conditions(condition: &Option<UserCondition>) -> Option<Vec<Condit
                 file_paths: None,
             }]
         }
+        UserCondition::Device { device } => vec![Condition::DeviceIf {
+            identifiers: vec![to_device_identifier(device)],
+        }],
+        UserCondition::Devices { devices } => vec![Condition::DeviceIf {
+            identifiers: devices.iter().map(to_device_identifier).collect(),
+        }],
+        UserCondition::DeviceUnless { device_unless } => vec![Condition::DeviceUnless {
+            identifiers: vec![to_device_identifier(device_unless)],
+        }],
+        UserCondition::DevicesUnless { devices_unless } => vec![Condition::DeviceUnless {
+            identifiers: devices_unless.iter().map(to_device_identifier).collect(),
+        }],
+        UserCondition::DeviceExists { device_exists } => vec![Condition::DeviceExistsIf {
+            identifiers: vec![to_device_identifier(device_exists)],
+        }],
+        UserCondition::DevicesExists { devices_exists } => vec![Condition::DeviceExistsIf {
+            identifiers: devices_exists.iter().map(to_device_identifier).collect(),
+        }],
+        UserCondition::DeviceExistsUnless {
+            device_exists_unless,
+        } => vec![Condition::DeviceExistsUnless {
+            identifiers: vec![to_device_identifier(device_exists_unless)],
+        }],
+        UserCondition::DevicesExistsUnless {
+            devices_exists_unless,
+        } => vec![Condition::DeviceExistsUnless {
+            identifiers: devices_exists_unless
+                .iter()
+                .map(to_device_identifier)
+                .collect(),
+        }],
+        UserCondition::InputSource { input_source } => vec![Condition::InputSourceIf {
+            input_sources: vec![to_input_source(input_source)],
+        }],
+        UserCondition::InputSources { input_sources } => vec![Condition::InputSourceIf {
+            input_sources: input_sources.iter().map(to_input_source).collect(),
+        }],
+        UserCondition::InputSourceUnless {
+            input_source_unless,
+        } => vec![Condition::InputSourceUnless {
+            input_sources: vec![to_input_source(input_source_unless)],
+        }],
+        UserCondition::InputSourcesUnless {
+            input_sources_unless,
+        } => vec![Condition::InputSourceUnless {
+            input_sources: input_sources_unless.iter().map(to_input_source).collect(),
+        }],
+        UserCondition::KeyboardType { keyboard_type } => vec![Condition::KeyboardTypeIf {
+            keyboard_types: vec![keyboard_type.clone()],
+        }],
+        UserCondition::KeyboardTypes { keyboard_types } => vec![Condition::KeyboardTypeIf {
+            keyboard_types: keyboard_types.clone(),
+        }],
+        UserCondition::KeyboardTypeUnless {
+            keyboard_type_unless,
+        } => vec![Condition::KeyboardTypeUnless {
+            keyboard_types: vec![keyboard_type_unless.clone()],
+        }],
+        UserCondition::KeyboardTypesUnless {
+            keyboard_types_unless,
+        } => vec![Condition::KeyboardTypeUnless {
+            keyboard_types: keyboard_types_unless.clone(),
+        }],
         UserCondition::Variable { variable, value } => vec![Condition::VariableIf {
             name: variable.clone(),
             value: value.clone(),
         }],
+        UserCondition::VariableUnless {
+            variable_unless,
+            value,
+        } => vec![Condition::VariableUnless {
+            name: variable_unless.clone(),
+            value: value.clone(),
+        }],
     })
+}
+
+fn to_device_identifier(src: &UserDeviceIdentifier) -> DeviceIdentifier {
+    DeviceIdentifier {
+        vendor_id: src.vendor_id,
+        product_id: src.product_id,
+        location_id: src.location_id,
+        is_keyboard: src.is_keyboard,
+        is_pointing_device: src.is_pointing_device,
+        is_game_pad: src.is_game_pad,
+        is_consumer: src.is_consumer,
+    }
+}
+
+fn to_input_source(src: &UserInputSource) -> InputSource {
+    InputSource {
+        language: src.language.clone(),
+        input_source_id: src.input_source_id.clone(),
+        input_mode_id: src.input_mode_id.clone(),
+    }
 }
 
 fn merge_conditions(
@@ -1306,5 +1476,118 @@ mod tests {
                 .map(String::as_str),
             Some("^com\\.apple\\.Xcode$")
         );
+    }
+
+    #[test]
+    fn device_condition_maps_to_device_if() {
+        let json = r#"{
+          "rules": [
+            {
+              "description": "device scoped",
+              "condition": {
+                "device": { "vendor_id": 1452, "product_id": 832 }
+              },
+              "mappings": [
+                { "from": "j", "to": "down_arrow" }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let conds = rules[0].manipulators[0]
+            .conditions
+            .as_ref()
+            .expect("conditions");
+        let Condition::DeviceIf { identifiers } = &conds[0] else {
+            panic!("expected device_if");
+        };
+        assert_eq!(identifiers.len(), 1);
+        assert_eq!(identifiers[0].vendor_id, Some(1452));
+    }
+
+    #[test]
+    fn input_source_unless_maps_to_input_source_unless() {
+        let json = r#"{
+          "rules": [
+            {
+              "description": "input source scoped",
+              "condition": {
+                "input_source_unless": { "language": "en" }
+              },
+              "mappings": [
+                { "from": "k", "to": "up_arrow" }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let conds = rules[0].manipulators[0]
+            .conditions
+            .as_ref()
+            .expect("conditions");
+        let Condition::InputSourceUnless { input_sources } = &conds[0] else {
+            panic!("expected input_source_unless");
+        };
+        assert_eq!(
+            input_sources.first().and_then(|s| s.language.as_deref()),
+            Some("en")
+        );
+    }
+
+    #[test]
+    fn keyboard_type_condition_maps_to_keyboard_type_if() {
+        let json = r#"{
+          "rules": [
+            {
+              "description": "keyboard type scoped",
+              "condition": { "keyboard_type": "ansi" },
+              "mappings": [
+                { "from": "l", "to": "right_arrow" }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let conds = rules[0].manipulators[0]
+            .conditions
+            .as_ref()
+            .expect("conditions");
+        let Condition::KeyboardTypeIf { keyboard_types } = &conds[0] else {
+            panic!("expected keyboard_type_if");
+        };
+        assert_eq!(keyboard_types, &vec!["ansi".to_string()]);
+    }
+
+    #[test]
+    fn variable_unless_condition_maps_to_variable_unless() {
+        let json = r#"{
+          "rules": [
+            {
+              "description": "variable unless scoped",
+              "condition": { "variable_unless": "blocked", "value": 1 },
+              "mappings": [
+                { "from": "spacebar", "to": "tab" }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let conds = rules[0].manipulators[0]
+            .conditions
+            .as_ref()
+            .expect("conditions");
+        let Condition::VariableUnless { name, value } = &conds[0] else {
+            panic!("expected variable_unless");
+        };
+        assert_eq!(name, "blocked");
+        assert_eq!(value.as_i64(), Some(1));
     }
 }
