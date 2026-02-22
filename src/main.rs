@@ -65,8 +65,15 @@ fn build(config_path: &PathBuf, dry_run: bool, profile: &str) -> Result<()> {
     let user_config: config::UserConfig =
         serde_json::from_str(&json).context("Failed to parse config JSON")?;
 
-    // Convert to Karabiner format
-    let rules = config::to_karabiner_rules(&user_config)?;
+    // Write to karabiner.json
+    let karabiner_path = dirs::home_dir()
+        .context("Could not find home directory")?
+        .join(".config/karabiner/karabiner.json");
+
+    // Convert to Karabiner format (native + imported rules)
+    let mut rules = config::to_karabiner_rules(&user_config)?;
+    let imported = config::load_imported_rules(&user_config, config_path, &karabiner_path)?;
+    rules.extend(imported);
     let simple_mods = config::to_simple_modifications(&user_config);
     let parameters = config::to_karabiner_parameters(&user_config.profile);
 
@@ -75,11 +82,6 @@ fn build(config_path: &PathBuf, dry_run: bool, profile: &str) -> Result<()> {
         println!("{}", output);
         return Ok(());
     }
-
-    // Write to karabiner.json
-    let karabiner_path = dirs::home_dir()
-        .context("Could not find home directory")?
-        .join(".config/karabiner/karabiner.json");
 
     karabiner::update_profile(
         &karabiner_path,

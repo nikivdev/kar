@@ -100,6 +100,25 @@ simlayers: {
 Use hold mode only for non-typing keys (or tightly scoped conditions).  
 For letter keys in normal typing, prefer simultaneous mode to avoid eaten keys.
 
+Optional hold-layer delay prevents accidental activations during fast typing:
+
+```typescript
+simlayers: {
+  "r-mode": { key: "r", mode: "hold", delay_ms: 140 },
+}
+```
+
+Optional leader mode (for hold layers) keeps the layer active after key release
+until escape:
+
+```typescript
+simlayers: {
+  "r-mode": { key: "r", mode: "hold", leader: true },
+  // custom:
+  // "r-mode": { key: "r", mode: "hold", leader: { sticky: true, escape: ["spacebar"] } },
+}
+```
+
 ## Key Mapping Examples
 
 ```typescript
@@ -155,6 +174,51 @@ Rule/layer conditions currently support:
 - device existence: `device_exists`, `devices_exists`, `device_exists_unless`, `devices_exists_unless`
 - input source: `input_source`, `input_sources`, `input_source_unless`, `input_sources_unless`
 - keyboard type: `keyboard_type`, `keyboard_types`, `keyboard_type_unless`, `keyboard_types_unless`
+
+Mapping-level `condition` is also supported and merged with rule/layer conditions.
+
+## Double Tap
+
+Use `from: { double_tap: ... }` on a mapping:
+
+```typescript
+{
+  description: "double tap quit guard",
+  mappings: [
+    {
+      from: { double_tap: "q", modifiers: "left_command" },
+      to: { key: "q", modifiers: "left_command" },
+      double_tap_delay_ms: 200,
+      // optional single-tap override:
+      // to_if_single_tap: { key: "q", modifiers: "left_command" },
+    },
+  ],
+}
+```
+
+This compiles into the standard Karabiner delayed-action variable pattern.
+
+## Imports
+
+Import existing rule sets from JSON files or other Karabiner profiles:
+
+```typescript
+imports: [
+  importJson("~/.config/karabiner/assets/complex_modifications/vi_mode.json"),
+  importProfile("legacy-profile"),
+  // explicit config path:
+  // importProfile("legacy-profile", "~/.config/karabiner/karabiner.json"),
+]
+```
+
+## Utility Helpers
+
+Helpers for DRY config composition:
+
+```typescript
+const nav = withMapper(["h", "j", "k", "l"] as const, (k) => ({ from: k, to: "left_arrow" }))
+const appOnly = withCondition({ app: "^com\\.apple\\.Terminal$" }, nav)
+```
 
 ## Contributing
 

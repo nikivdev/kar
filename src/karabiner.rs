@@ -98,6 +98,8 @@ pub struct Manipulator {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to_after_key_up: Option<Vec<ToEvent>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub to_delayed_action: Option<ToDelayedAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub conditions: Option<Vec<Condition>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<ManipulatorParameters>,
@@ -115,6 +117,22 @@ pub struct ManipulatorParameters {
         skip_serializing_if = "Option::is_none"
     )]
     pub to_if_alone_timeout: Option<u32>,
+    #[serde(
+        rename = "basic.to_if_held_down_threshold_milliseconds",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub to_if_held_down_threshold: Option<u32>,
+    #[serde(
+        rename = "basic.to_delayed_action_delay_milliseconds",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub to_delayed_action_delay: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToDelayedAction {
+    pub to_if_invoked: Vec<ToEvent>,
+    pub to_if_canceled: Vec<ToEvent>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

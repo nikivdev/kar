@@ -51,6 +51,11 @@ export interface ProfileSettings {
   sim?: number
 }
 
+export interface LeaderMode {
+  sticky?: boolean
+  escape?: KeyCode[]
+}
+
 // Simlayer definition
 export interface Simlayer {
   /** The key that activates this simlayer */
@@ -67,6 +72,10 @@ export interface Simlayer {
   mode?: "hold" | "simultaneous"
   /** Optional condition that gates this layer */
   condition?: Condition
+  /** Optional hold delay in ms before layer activates */
+  delay_ms?: number
+  /** Optional leader mode for hold layers */
+  leader?: boolean | LeaderMode
   /** Optional metadata/documentation field */
   note?: string
 }
@@ -75,6 +84,7 @@ export interface Simlayer {
 export type FromKey =
   | KeyCode
   | { key: KeyCode; modifiers?: Modifier | Modifier[]; optional?: Modifier[] }
+  | { double_tap: KeyCode; modifiers?: Modifier | Modifier[]; optional?: Modifier[] }
   | KeyCode[] // Simultaneous keys
 
 // Mouse key specification
@@ -114,6 +124,22 @@ export interface InputSource {
   input_source_id?: string
   input_mode_id?: string
 }
+
+export interface DelayedAction {
+  invoked: ToKey
+  canceled: ToKey
+}
+
+export interface MappingParameters {
+  simultaneous_threshold_ms?: number
+  to_if_alone_timeout_ms?: number
+  to_if_held_down_threshold_ms?: number
+  to_delayed_action_delay_ms?: number
+}
+
+export type ImportSource =
+  | { import_json: string }
+  | { import_profile: string; karabiner_json?: string }
 
 // To key specification
 export type ToKey =
@@ -172,6 +198,18 @@ export interface Mapping {
   to_if_alone?: ToKey
   /** Action when key is held down */
   to_if_held?: ToKey
+  /** Action after key-up */
+  to_after_key_up?: ToKey
+  /** Delayed action semantics */
+  to_delayed?: DelayedAction
+  /** Per-mapping manipulator parameters */
+  parameters?: MappingParameters
+  /** Mapping-local condition (merged with rule/layer conditions) */
+  condition?: Condition
+  /** For from.double_tap: action when single-tap wins */
+  to_if_single_tap?: ToKey
+  /** For from.double_tap: delay window in ms */
+  double_tap_delay_ms?: number
   /** Optional structured signal metadata (schema-only; no runtime cost in kar) */
   signal?: MappingSignal
   /** Optional metadata/documentation field */
@@ -206,6 +244,8 @@ export interface Config {
   simlayers?: Record<string, Simlayer>
   /** Simple key remappings (e.g., caps_lock -> escape) */
   simple?: SimpleModification[]
+  /** Import rules from JSON files or existing profiles */
+  imports?: ImportSource[]
   rules: Rule[]
 }
 
@@ -253,6 +293,37 @@ export function seqOpenApp(app: string, endpoint = "/tmp/seqd.sock"): { socket_c
 
 export function seqOpenAppToggle(app: string, endpoint = "/tmp/seqd.sock"): { socket_command: SocketCommand } {
   return socketCommand(endpoint, `OPEN_APP_TOGGLE ${app}`)
+}
+
+// Declare a double-tap from-key object.
+export function doubleTap(
+  key: KeyCode,
+  options?: { modifiers?: Modifier | Modifier[]; optional?: Modifier[] },
+): { double_tap: KeyCode; modifiers?: Modifier | Modifier[]; optional?: Modifier[] } {
+  return {
+    double_tap: key,
+    ...(options?.modifiers ? { modifiers: options.modifiers } : {}),
+    ...(options?.optional ? { optional: options.optional } : {}),
+  }
+}
+
+export function importJson(path: string): ImportSource {
+  return { import_json: path }
+}
+
+export function importProfile(profile: string, karabinerJson?: string): ImportSource {
+  return { import_profile: profile, ...(karabinerJson ? { karabiner_json: karabinerJson } : {}) }
+}
+
+export function withMapper<T>(src: readonly T[], mapper: (value: T, index: number) => Mapping): Mapping[] {
+  return src.map(mapper)
+}
+
+export function withCondition(condition: Condition, mappings: readonly Mapping[]): Mapping[] {
+  return mappings.map((m) => ({
+    ...m,
+    condition: m.condition ?? condition,
+  }))
 }
 
 export function km(macroName: string): { shell: string } {

@@ -1,13 +1,14 @@
 use crate::karabiner::{
     Condition, DeviceIdentifier, FromEvent, FromKeyCode, FromModifiers, FromSimultaneous,
-    InputSource, Manipulator, ManipulatorParameters, Parameters, Rule, SetVariable,
-    SimpleModificationEntry, SimpleModificationKey, SimultaneousKey, SimultaneousOptions,
-    SocketCommand, ToEvent, ToKeyCode, ToMouseKey, ToPointingButton, ToSendUserCommand,
-    ToSetVariable, ToShellCommand, ToSocketCommand,
+    InputSource, KarabinerConfig, Manipulator, ManipulatorParameters, Parameters, Rule,
+    SetVariable, SimpleModificationEntry, SimpleModificationKey, SimultaneousKey,
+    SimultaneousOptions, SocketCommand, ToDelayedAction, ToEvent, ToKeyCode, ToMouseKey,
+    ToPointingButton, ToSendUserCommand, ToSetVariable, ToShellCommand, ToSocketCommand,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 
 /// User-facing config schema (simplified, declarative)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,7 +20,22 @@ pub struct UserConfig {
     #[serde(default)]
     pub simple: Vec<SimpleModification>,
     #[serde(default)]
+    pub imports: Vec<ImportSource>,
+    #[serde(default)]
     pub rules: Vec<UserRule>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ImportSource {
+    ImportJson {
+        import_json: String,
+    },
+    ImportProfile {
+        import_profile: String,
+        #[serde(default)]
+        karabiner_json: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,10 +74,29 @@ pub struct Simlayer {
     pub alone: Option<u32>,
     #[serde(default)]
     pub condition: Option<UserCondition>,
+    #[serde(default)]
+    pub delay_ms: Option<u32>,
+    #[serde(default)]
+    pub leader: Option<LeaderMode>,
     #[serde(default = "default_simlayer_mode")]
     pub mode: SimlayerMode,
     #[serde(default)]
     pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum LeaderMode {
+    Enabled(bool),
+    Config(LeaderConfig),
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LeaderConfig {
+    #[serde(default)]
+    pub sticky: bool,
+    #[serde(default)]
+    pub escape: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -201,9 +236,39 @@ pub struct Mapping {
     #[serde(default)]
     pub to_if_held: Option<ToKey>,
     #[serde(default)]
+    pub to_after_key_up: Option<ToKey>,
+    #[serde(default)]
+    pub to_delayed: Option<MappingDelayedAction>,
+    #[serde(default)]
+    pub parameters: Option<MappingParameters>,
+    #[serde(default)]
+    pub condition: Option<UserCondition>,
+    #[serde(default)]
+    pub to_if_single_tap: Option<ToKey>,
+    #[serde(default)]
+    pub double_tap_delay_ms: Option<u32>,
+    #[serde(default)]
     pub signal: Option<MappingSignal>,
     #[serde(default)]
     pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MappingDelayedAction {
+    pub invoked: ToKey,
+    pub canceled: ToKey,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MappingParameters {
+    #[serde(default)]
+    pub simultaneous_threshold_ms: Option<u32>,
+    #[serde(default)]
+    pub to_if_alone_timeout_ms: Option<u32>,
+    #[serde(default)]
+    pub to_if_held_down_threshold_ms: Option<u32>,
+    #[serde(default)]
+    pub to_delayed_action_delay_ms: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,6 +295,13 @@ pub enum FromKey {
     Simple(String),
     WithModifiers {
         key: String,
+        #[serde(default)]
+        modifiers: Option<Modifiers>,
+        #[serde(default)]
+        optional: Option<Vec<String>>,
+    },
+    DoubleTap {
+        double_tap: String,
         #[serde(default)]
         modifiers: Option<Modifiers>,
         #[serde(default)]
@@ -317,6 +389,85 @@ pub fn to_karabiner_rules(config: &UserConfig) -> Result<Vec<Rule>> {
     Ok(rules)
 }
 
+pub fn load_imported_rules(
+    config: &UserConfig,
+    config_path: &Path,
+    default_karabiner_path: &Path,
+) -> Result<Vec<Rule>> {
+    let mut out = Vec::new();
+    let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
+
+    for source in &config.imports {
+        match source {
+            ImportSource::ImportJson { import_json } => {
+                let path = if Path::new(import_json).is_absolute() {
+                    Path::new(import_json).to_path_buf()
+                } else {
+                    config_dir.join(import_json)
+                };
+                let raw = std::fs::read_to_string(&path)
+                    .with_context(|| format!("failed to read import_json: {}", path.display()))?;
+                let value: serde_json::Value = serde_json::from_str(&raw)
+                    .with_context(|| format!("failed to parse JSON from {}", path.display()))?;
+                out.extend(parse_imported_rules_value(&value).with_context(|| {
+                    format!("failed to parse imported rules from {}", path.display())
+                })?);
+            }
+            ImportSource::ImportProfile {
+                import_profile,
+                karabiner_json,
+            } => {
+                let path = karabiner_json
+                    .as_ref()
+                    .map(|p| {
+                        if Path::new(p).is_absolute() {
+                            Path::new(p).to_path_buf()
+                        } else {
+                            config_dir.join(p)
+                        }
+                    })
+                    .unwrap_or_else(|| default_karabiner_path.to_path_buf());
+                let raw = std::fs::read_to_string(&path).with_context(|| {
+                    format!(
+                        "failed to read karabiner config for import_profile: {}",
+                        path.display()
+                    )
+                })?;
+                let cfg: KarabinerConfig = serde_json::from_str(&raw).with_context(|| {
+                    format!("failed to parse karabiner config: {}", path.display())
+                })?;
+                let profile = cfg
+                    .profiles
+                    .iter()
+                    .find(|p| p.name == *import_profile)
+                    .with_context(|| {
+                        format!(
+                            "import_profile '{}' not found in {}",
+                            import_profile,
+                            path.display()
+                        )
+                    })?;
+                out.extend(profile.complex_modifications.rules.clone());
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+fn parse_imported_rules_value(value: &serde_json::Value) -> Result<Vec<Rule>> {
+    if let Some(rules_val) = value.get("rules") {
+        return Ok(serde_json::from_value(rules_val.clone())?);
+    }
+    if value.is_array() {
+        return Ok(serde_json::from_value(value.clone())?);
+    }
+    if value.get("manipulators").is_some() {
+        return Ok(vec![serde_json::from_value(value.clone())?]);
+    }
+    anyhow::bail!("expected JSON object with 'rules', a rules array, or a single rule object");
+}
+
 fn convert_rule(user_rule: &UserRule, config: &UserConfig, rule_idx: usize) -> Result<Rule> {
     let mut manipulators = Vec::new();
 
@@ -330,6 +481,12 @@ fn convert_rule(user_rule: &UserRule, config: &UserConfig, rule_idx: usize) -> R
         build_base_conditions(&user_rule.condition),
         simlayer.and_then(|(_, layer)| build_base_conditions(&layer.condition)),
     );
+    let leader_enabled = simlayer
+        .map(|(_, layer)| layer.mode == SimlayerMode::Hold && simlayer_leader_enabled(layer))
+        .unwrap_or(false);
+    let leader_sticky = simlayer
+        .map(|(_, layer)| simlayer_leader_sticky(layer))
+        .unwrap_or(false);
 
     // Goku-style hold layer: press-and-hold layer key to activate variable, tap to emit key.
     if let Some((layer_name, layer)) = simlayer {
@@ -338,37 +495,85 @@ fn convert_rule(user_rule: &UserRule, config: &UserConfig, rule_idx: usize) -> R
                 key_code: layer.key.clone(),
                 modifiers: Some(simlayer_from_modifiers(layer, true)),
             });
-            let to = vec![ToEvent::SetVariable(ToSetVariable {
+            let set_var_on = ToEvent::SetVariable(ToSetVariable {
                 set_variable: SetVariable {
                     name: layer_name.clone(),
                     value: serde_json::Value::Number(1.into()),
                 },
-            })];
-            let to_after_key_up = vec![ToEvent::SetVariable(ToSetVariable {
+            });
+            let set_var_off = ToEvent::SetVariable(ToSetVariable {
                 set_variable: SetVariable {
                     name: layer_name.clone(),
                     value: serde_json::Value::Number(0.into()),
                 },
-            })];
+            });
+            let to_after_key_up = if leader_enabled {
+                None
+            } else {
+                Some(vec![set_var_off.clone()])
+            };
             let to_if_alone = vec![ToEvent::KeyCode(ToKeyCode {
                 key_code: layer.key.clone(),
                 modifiers: None,
                 lazy: None,
                 repeat: None,
             })];
+            let delay_ms = layer.delay_ms;
+            let mut params = ManipulatorParameters {
+                simultaneous_threshold: None,
+                to_if_alone_timeout: Some(layer.alone.unwrap_or(config.profile.alone)),
+                to_if_held_down_threshold: delay_ms,
+                to_delayed_action_delay: None,
+            };
+            if delay_ms.is_some() && layer.alone.is_none() {
+                params.to_if_alone_timeout = delay_ms;
+            }
             manipulators.push(Manipulator {
                 manipulator_type: "basic".to_string(),
                 from,
-                to: Some(to),
+                to: if delay_ms.is_some() {
+                    None
+                } else {
+                    Some(vec![set_var_on.clone()])
+                },
                 to_if_alone: Some(to_if_alone),
-                to_if_held_down: None,
-                to_after_key_up: Some(to_after_key_up),
+                to_if_held_down: if delay_ms.is_some() {
+                    Some(vec![set_var_on.clone()])
+                } else {
+                    None
+                },
+                to_after_key_up,
+                to_delayed_action: None,
                 conditions: base_conditions.clone(),
-                parameters: Some(ManipulatorParameters {
-                    simultaneous_threshold: None,
-                    to_if_alone_timeout: Some(layer.alone.unwrap_or(config.profile.alone)),
-                }),
+                parameters: Some(params),
             });
+
+            if leader_enabled {
+                for escape_key in simlayer_leader_escape_keys(layer) {
+                    let mut escape_conditions = base_conditions.clone().unwrap_or_default();
+                    escape_conditions.push(Condition::VariableIf {
+                        name: layer_name.clone(),
+                        value: serde_json::Value::Number(1.into()),
+                    });
+                    manipulators.push(Manipulator {
+                        manipulator_type: "basic".to_string(),
+                        from: FromEvent::KeyCode(FromKeyCode {
+                            key_code: escape_key,
+                            modifiers: Some(FromModifiers {
+                                mandatory: None,
+                                optional: Some(vec!["any".to_string()]),
+                            }),
+                        }),
+                        to: Some(vec![set_var_off.clone()]),
+                        to_if_alone: None,
+                        to_if_held_down: None,
+                        to_after_key_up: None,
+                        to_delayed_action: None,
+                        conditions: Some(escape_conditions),
+                        parameters: None,
+                    });
+                }
+            }
         }
     }
 
@@ -379,6 +584,8 @@ fn convert_rule(user_rule: &UserRule, config: &UserConfig, rule_idx: usize) -> R
             simlayer,
             &config.profile,
             base_conditions.clone(),
+            leader_enabled,
+            leader_sticky,
             &signal_context,
         )?;
         manipulators.extend(manips);
@@ -550,17 +757,93 @@ fn simlayer_from_modifiers(layer: &Simlayer, allow_any_fallback: bool) -> FromMo
     }
 }
 
+fn simlayer_leader_enabled(layer: &Simlayer) -> bool {
+    match layer.leader.as_ref() {
+        Some(LeaderMode::Enabled(v)) => *v,
+        Some(LeaderMode::Config(_)) => true,
+        None => false,
+    }
+}
+
+fn simlayer_leader_sticky(layer: &Simlayer) -> bool {
+    match layer.leader.as_ref() {
+        Some(LeaderMode::Config(cfg)) => cfg.sticky,
+        _ => false,
+    }
+}
+
+fn simlayer_leader_escape_keys(layer: &Simlayer) -> Vec<String> {
+    match layer.leader.as_ref() {
+        Some(LeaderMode::Config(cfg)) => cfg
+            .escape
+            .clone()
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| vec!["escape".to_string(), "caps_lock".to_string()]),
+        _ => vec!["escape".to_string(), "caps_lock".to_string()],
+    }
+}
+
+fn mapping_to_delayed_action(
+    mapping: &Mapping,
+    signal_context: &SignalContext,
+) -> Option<ToDelayedAction> {
+    mapping.to_delayed.as_ref().map(|d| ToDelayedAction {
+        to_if_invoked: convert_to_events(&d.invoked, Some(signal_context)),
+        to_if_canceled: convert_to_events(&d.canceled, Some(signal_context)),
+    })
+}
+
+fn merge_mapping_parameters(
+    mapping: &Mapping,
+    mut base: Option<ManipulatorParameters>,
+) -> Option<ManipulatorParameters> {
+    let Some(custom) = mapping.parameters.as_ref() else {
+        return base;
+    };
+    let mut params = base.take().unwrap_or_default();
+    if let Some(v) = custom.simultaneous_threshold_ms {
+        params.simultaneous_threshold = Some(v);
+    }
+    if let Some(v) = custom.to_if_alone_timeout_ms {
+        params.to_if_alone_timeout = Some(v);
+    }
+    if let Some(v) = custom.to_if_held_down_threshold_ms {
+        params.to_if_held_down_threshold = Some(v);
+    }
+    if let Some(v) = custom.to_delayed_action_delay_ms {
+        params.to_delayed_action_delay = Some(v);
+    }
+    Some(params)
+}
+
 fn convert_mapping(
     mapping: &Mapping,
     simlayer: Option<(&String, &Simlayer)>,
     profile: &ProfileSettings,
     base_conditions: Option<Vec<Condition>>,
+    leader_enabled: bool,
+    leader_sticky: bool,
     signal_context: &SignalContext,
 ) -> Result<Vec<Manipulator>> {
     let mut manipulators = Vec::new();
 
-    // Build base condition from user condition
-    let mut conditions: Option<Vec<Condition>> = base_conditions;
+    // Build condition chain: rule -> layer -> mapping
+    let mut conditions =
+        merge_conditions(base_conditions, build_base_conditions(&mapping.condition));
+
+    let mapping_to_if_alone = mapping
+        .to_if_alone
+        .as_ref()
+        .map(|t| convert_to_events(t, Some(signal_context)));
+    let mapping_to_if_held = mapping
+        .to_if_held
+        .as_ref()
+        .map(|t| convert_to_events(t, Some(signal_context)));
+    let mapping_to_after_key_up = mapping
+        .to_after_key_up
+        .as_ref()
+        .map(|t| convert_to_events(t, Some(signal_context)));
+    let mapping_to_delayed = mapping_to_delayed_action(mapping, signal_context);
 
     match &mapping.from {
         FromKey::Simultaneous(keys) => {
@@ -591,20 +874,127 @@ fn convert_mapping(
                 manipulator_type: "basic".to_string(),
                 from,
                 to: Some(convert_to_events(&mapping.to, Some(signal_context))),
-                to_if_alone: mapping
-                    .to_if_alone
-                    .as_ref()
-                    .map(|t| convert_to_events(t, Some(signal_context))),
-                to_if_held_down: mapping
-                    .to_if_held
-                    .as_ref()
-                    .map(|t| convert_to_events(t, Some(signal_context))),
-                to_after_key_up: None,
+                to_if_alone: mapping_to_if_alone.clone(),
+                to_if_held_down: mapping_to_if_held.clone(),
+                to_after_key_up: mapping_to_after_key_up.clone(),
+                to_delayed_action: mapping_to_delayed.clone(),
                 conditions: conditions.clone(),
-                parameters: Some(ManipulatorParameters {
-                    simultaneous_threshold: Some(profile.sim),
-                    to_if_alone_timeout: None,
+                parameters: merge_mapping_parameters(
+                    mapping,
+                    Some(ManipulatorParameters {
+                        simultaneous_threshold: Some(profile.sim),
+                        to_if_alone_timeout: None,
+                        to_if_held_down_threshold: None,
+                        to_delayed_action_delay: None,
+                    }),
+                ),
+            });
+        }
+        FromKey::DoubleTap {
+            double_tap,
+            modifiers,
+            optional,
+        } => {
+            let from_mods = Some(FromModifiers {
+                mandatory: modifiers.as_ref().map(|m| m.to_vec()),
+                optional: optional.clone(),
+            });
+            let from = FromEvent::KeyCode(FromKeyCode {
+                key_code: double_tap.clone(),
+                modifiers: from_mods.clone(),
+            });
+            let var_name = format!("double-tap-{}", slug_for_id(&signal_context.mapping_id));
+
+            let mut armed_conditions = conditions.clone().unwrap_or_default();
+            armed_conditions.push(Condition::VariableIf {
+                name: var_name.clone(),
+                value: serde_json::Value::Number(1.into()),
+            });
+            manipulators.push(Manipulator {
+                manipulator_type: "basic".to_string(),
+                from: from.clone(),
+                to: Some(convert_to_events(&mapping.to, Some(signal_context))),
+                to_if_alone: mapping_to_if_alone.clone(),
+                to_if_held_down: mapping_to_if_held.clone(),
+                to_after_key_up: mapping_to_after_key_up.clone(),
+                to_delayed_action: mapping_to_delayed.clone(),
+                conditions: Some(armed_conditions),
+                parameters: merge_mapping_parameters(mapping, None),
+            });
+
+            let single_tap_events = if let Some(to) = &mapping.to_if_single_tap {
+                convert_to_events(to, Some(signal_context))
+            } else {
+                let mandatory = from_mods
+                    .as_ref()
+                    .and_then(|m| m.mandatory.as_ref())
+                    .map(|mods| {
+                        mods.iter()
+                            .filter(|m| m.as_str() != "any")
+                            .cloned()
+                            .collect::<Vec<String>>()
+                    })
+                    .filter(|mods| !mods.is_empty());
+                vec![ToEvent::KeyCode(ToKeyCode {
+                    key_code: double_tap.clone(),
+                    modifiers: mandatory,
+                    lazy: None,
+                    repeat: None,
+                })]
+            };
+            let delay_ms = mapping
+                .double_tap_delay_ms
+                .or_else(|| {
+                    mapping
+                        .parameters
+                        .as_ref()
+                        .and_then(|p| p.to_delayed_action_delay_ms)
+                })
+                .unwrap_or(200);
+            let mut disarmed_conditions = conditions.clone().unwrap_or_default();
+            disarmed_conditions.push(Condition::VariableUnless {
+                name: var_name.clone(),
+                value: serde_json::Value::Number(1.into()),
+            });
+            let mut invoked = single_tap_events;
+            invoked.push(ToEvent::SetVariable(ToSetVariable {
+                set_variable: SetVariable {
+                    name: var_name.clone(),
+                    value: serde_json::Value::Number(0.into()),
+                },
+            }));
+            let canceled = vec![ToEvent::SetVariable(ToSetVariable {
+                set_variable: SetVariable {
+                    name: var_name.clone(),
+                    value: serde_json::Value::Number(0.into()),
+                },
+            })];
+            manipulators.push(Manipulator {
+                manipulator_type: "basic".to_string(),
+                from,
+                to: Some(vec![ToEvent::SetVariable(ToSetVariable {
+                    set_variable: SetVariable {
+                        name: var_name,
+                        value: serde_json::Value::Number(1.into()),
+                    },
+                })]),
+                to_if_alone: None,
+                to_if_held_down: None,
+                to_after_key_up: None,
+                to_delayed_action: Some(ToDelayedAction {
+                    to_if_invoked: invoked,
+                    to_if_canceled: canceled,
                 }),
+                conditions: Some(disarmed_conditions),
+                parameters: merge_mapping_parameters(
+                    mapping,
+                    Some(ManipulatorParameters {
+                        simultaneous_threshold: None,
+                        to_if_alone_timeout: None,
+                        to_if_held_down_threshold: None,
+                        to_delayed_action_delay: Some(delay_ms),
+                    }),
+                ),
             });
         }
         _ => {
@@ -622,6 +1012,7 @@ fn convert_mapping(
                     };
                     (key.clone(), Some(mods))
                 }
+                FromKey::DoubleTap { .. } => unreachable!(),
                 FromKey::Simultaneous(_) => unreachable!(),
             };
 
@@ -651,18 +1042,24 @@ fn convert_mapping(
                 manipulators.push(Manipulator {
                     manipulator_type: "basic".to_string(),
                     from,
-                    to: Some(convert_to_events(&mapping.to, Some(signal_context))),
-                    to_if_alone: mapping
-                        .to_if_alone
-                        .as_ref()
-                        .map(|t| convert_to_events(t, Some(signal_context))),
-                    to_if_held_down: mapping
-                        .to_if_held
-                        .as_ref()
-                        .map(|t| convert_to_events(t, Some(signal_context))),
-                    to_after_key_up: None,
+                    to: {
+                        let mut events = convert_to_events(&mapping.to, Some(signal_context));
+                        if leader_enabled && !leader_sticky && layer.mode == SimlayerMode::Hold {
+                            events.push(ToEvent::SetVariable(ToSetVariable {
+                                set_variable: SetVariable {
+                                    name: var_name.clone(),
+                                    value: serde_json::Value::Number(0.into()),
+                                },
+                            }));
+                        }
+                        Some(events)
+                    },
+                    to_if_alone: mapping_to_if_alone.clone(),
+                    to_if_held_down: mapping_to_if_held.clone(),
+                    to_after_key_up: mapping_to_after_key_up.clone(),
+                    to_delayed_action: mapping_to_delayed.clone(),
                     conditions: conditions.clone(),
-                    parameters: None,
+                    parameters: merge_mapping_parameters(mapping, None),
                 });
 
                 if layer.mode == SimlayerMode::Simultaneous {
@@ -706,11 +1103,19 @@ fn convert_mapping(
                         to_if_alone: None,
                         to_if_held_down: None,
                         to_after_key_up: None,
+                        to_delayed_action: None,
                         conditions: None,
-                        parameters: Some(ManipulatorParameters {
-                            simultaneous_threshold: Some(layer.threshold.unwrap_or(profile.sim)),
-                            to_if_alone_timeout: None,
-                        }),
+                        parameters: merge_mapping_parameters(
+                            mapping,
+                            Some(ManipulatorParameters {
+                                simultaneous_threshold: Some(
+                                    layer.threshold.unwrap_or(profile.sim),
+                                ),
+                                to_if_alone_timeout: None,
+                                to_if_held_down_threshold: None,
+                                to_delayed_action_delay: None,
+                            }),
+                        ),
                     });
                 }
             } else {
@@ -724,17 +1129,12 @@ fn convert_mapping(
                     manipulator_type: "basic".to_string(),
                     from,
                     to: Some(convert_to_events(&mapping.to, Some(signal_context))),
-                    to_if_alone: mapping
-                        .to_if_alone
-                        .as_ref()
-                        .map(|t| convert_to_events(t, Some(signal_context))),
-                    to_if_held_down: mapping
-                        .to_if_held
-                        .as_ref()
-                        .map(|t| convert_to_events(t, Some(signal_context))),
-                    to_after_key_up: None,
+                    to_if_alone: mapping_to_if_alone,
+                    to_if_held_down: mapping_to_if_held,
+                    to_after_key_up: mapping_to_after_key_up,
+                    to_delayed_action: mapping_to_delayed,
                     conditions,
-                    parameters: None,
+                    parameters: merge_mapping_parameters(mapping, None),
                 });
             }
         }
@@ -1589,5 +1989,156 @@ mod tests {
         };
         assert_eq!(name, "blocked");
         assert_eq!(value.as_i64(), Some(1));
+    }
+
+    #[test]
+    fn double_tap_from_builds_dual_manipulators_with_delay() {
+        let json = r#"{
+          "rules": [
+            {
+              "description": "double tap",
+              "mappings": [
+                {
+                  "id": "map.double.tap",
+                  "from": { "double_tap": "q", "modifiers": "left_command" },
+                  "to": "escape",
+                  "double_tap_delay_ms": 150
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        assert_eq!(rules[0].manipulators.len(), 2);
+        let has_action = rules[0].manipulators.iter().any(|m| {
+            m.conditions.as_ref().is_some_and(|conds| {
+                conds
+                    .iter()
+                    .any(|c| matches!(c, Condition::VariableIf { .. }))
+            }) && m.to.as_ref().is_some_and(|to| {
+                matches!(
+                    to.first(),
+                    Some(ToEvent::KeyCode(ToKeyCode { key_code, .. })) if key_code == "escape"
+                )
+            })
+        });
+        assert!(has_action, "double tap action manipulator missing");
+        let has_toggle = rules[0].manipulators.iter().any(|m| {
+            m.to_delayed_action
+                .as_ref()
+                .is_some_and(|d| !d.to_if_invoked.is_empty() && !d.to_if_canceled.is_empty())
+                && m.parameters
+                    .as_ref()
+                    .and_then(|p| p.to_delayed_action_delay)
+                    == Some(150)
+        });
+        assert!(has_toggle, "double tap toggle manipulator missing");
+    }
+
+    #[test]
+    fn hold_layer_leader_mode_adds_escape_and_keeps_layer_on_key_up() {
+        let json = r#"{
+          "simlayers": {
+            "r-mode": { "key": "r", "mode": "hold", "leader": true }
+          },
+          "rules": [
+            {
+              "description": "leader",
+              "layer": "r-mode",
+              "mappings": [
+                { "from": "l", "to": "right_arrow" }
+              ]
+            }
+          ]
+        }"#;
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        // gate + 2 escapes + 1 mapping
+        assert_eq!(rules[0].manipulators.len(), 4);
+        let gate = &rules[0].manipulators[0];
+        assert!(
+            gate.to_after_key_up.is_none(),
+            "leader gate should not auto-disable on key up"
+        );
+        let has_escape = rules[0].manipulators.iter().any(|m| {
+            matches!(
+                m.from,
+                FromEvent::KeyCode(FromKeyCode { ref key_code, .. }) if key_code == "escape"
+            )
+        });
+        assert!(has_escape, "leader escape manipulator missing");
+    }
+
+    #[test]
+    fn hold_layer_delay_activates_on_hold_threshold() {
+        let json = r#"{
+          "simlayers": {
+            "r-mode": { "key": "r", "mode": "hold", "delay_ms": 140 }
+          },
+          "rules": [
+            {
+              "description": "delayed hold",
+              "layer": "r-mode",
+              "mappings": [
+                { "from": "h", "to": "left_arrow" }
+              ]
+            }
+          ]
+        }"#;
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let gate = &rules[0].manipulators[0];
+        assert!(
+            gate.to.is_none(),
+            "delayed hold gate should not activate on key down"
+        );
+        assert!(
+            gate.to_if_held_down.is_some(),
+            "delayed hold gate should activate on hold"
+        );
+        assert_eq!(
+            gate.parameters
+                .as_ref()
+                .and_then(|p| p.to_if_held_down_threshold),
+            Some(140)
+        );
+    }
+
+    #[test]
+    fn import_json_rules_are_loaded() {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let import_path = std::env::temp_dir().join(format!("kar_import_rules_{ts}.json"));
+        let content = r#"{
+          "rules": [
+            {
+              "description": "imported",
+              "manipulators": [
+                { "type": "basic", "from": { "key_code": "a" }, "to": [{ "key_code": "b" }] }
+              ]
+            }
+          ]
+        }"#;
+        std::fs::write(&import_path, content).expect("write import");
+
+        let cfg_json = format!(
+            r#"{{
+              "imports": [{{ "import_json": "{}" }}],
+              "rules": []
+            }}"#,
+            import_path.display()
+        );
+        let config: UserConfig = serde_json::from_str(&cfg_json).expect("valid config");
+        let config_path = std::env::temp_dir().join(format!("kar_cfg_{ts}.ts"));
+        let loaded =
+            load_imported_rules(&config, &config_path, &import_path).expect("load imports");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].description, "imported");
+
+        let _ = std::fs::remove_file(import_path);
     }
 }
