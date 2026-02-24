@@ -42,8 +42,32 @@ In `seq` (`cli/cpp/src/actions.mm`), eager keystroke path now:
 This keeps latency low while avoiding key-delivery races.
 
 ### 3) Kar mapping strategy
-For high-frequency chord (`j+k`) use local `seq(...)` with explicit tuning and per-chord threshold override.
-For Arc frontmost-sensitive sequences use non-eager mode.
+- Keep Arc frontmost-sensitive sequences on `seq(...)` with explicit waits.
+- For `j+k` Safari new-tab specifically, prefer `seqSocket("open Safari new tab")` over local `seq(...)`.
+
+## Recurring issue: `j+k` opens Safari but does not create tab
+
+### Symptom
+- `j+k` is detected.
+- Safari activates, but `cmd+t` is dropped.
+- In some cases, when already in Safari, nothing happens.
+
+### Why this recurs
+`seq(...)` runs local `seq run` from Karabiner shell-command context. This can drift in reliability depending on runtime signing/permission state and launch context, even when the macro itself is valid.
+
+`seqSocket(...)` goes through the user-command receiver path and has been consistently more stable for this specific keystroke-heavy chord.
+
+### Known-good mapping
+
+```ts
+{
+  from: ["j", "k"],
+  parameters: { simultaneous_threshold_ms: 40 },
+  to: seqSocket("open Safari new tab"),
+}
+```
+
+Use the same for `["k","j"]`.
 
 ## Why this matters
 When a mapping compiles but still “does nothing,” threshold tuning often is not the issue. Validate local `seq` executable health first.
