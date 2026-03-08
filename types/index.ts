@@ -272,6 +272,53 @@ export function sendUserCommand(payload: unknown, endpoint?: string): { send_use
   return { send_user_command: { payload, endpoint } }
 }
 
+export interface ModifierVariant {
+  modifiers?: Modifier | Modifier[]
+  optional?: Modifier[]
+  to: ToKey
+}
+
+export interface PathModifierVariant {
+  modifiers?: Modifier | Modifier[]
+  optional?: Modifier[]
+  open: (path: string) => ToKey
+}
+
+export function withModifierVariants(
+  from: KeyCode,
+  to: ToKey,
+  variants: readonly ModifierVariant[],
+): Mapping[] {
+  return [
+    ...variants.map((variant) => ({
+      from: {
+        key: from,
+        ...(variant.modifiers ? { modifiers: variant.modifiers } : {}),
+        ...(variant.optional ? { optional: variant.optional } : {}),
+      },
+      to: variant.to,
+    })),
+    { from, to },
+  ]
+}
+
+export function openWithModifierVariants(
+  from: KeyCode,
+  path: string,
+  open: (path: string) => ToKey,
+  variants: readonly PathModifierVariant[],
+): Mapping[] {
+  return withModifierVariants(
+    from,
+    open(path),
+    variants.map((variant) => ({
+      modifiers: variant.modifiers,
+      optional: variant.optional,
+      to: variant.open(path),
+    })),
+  )
+}
+
 function seqPayload(payload: Record<string, unknown>): Record<string, unknown> {
   return payload.v === 1 ? payload : { v: 1, ...payload }
 }

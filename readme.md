@@ -119,6 +119,28 @@ simlayers: {
 }
 ```
 
+Mapping-level modifiers also apply to simultaneous layer triggers. For example,
+inside `k-mode`, this mapping matches `left_command + k+w`:
+
+```typescript
+{
+  description: "k-mode editors",
+  layer: "k-mode",
+  mappings: [
+    { from: "w", to: zed("~/repos/reatom/reatom") },
+    { from: { key: "w", modifiers: "left_command" }, to: cursor("~/repos/reatom/reatom") },
+  ],
+}
+```
+
+If you want to keep the path only once, use a build-time helper:
+
+```typescript
+...openWithModifierVariants("w", "~/repos/reatom/reatom", zed, [
+  { modifiers: "left_command", open: cursor },
+])
+```
+
 ## Key Mapping Examples
 
 ```typescript

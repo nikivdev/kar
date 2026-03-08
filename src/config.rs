@@ -766,6 +766,50 @@ fn simlayer_from_modifiers(layer: &Simlayer, allow_any_fallback: bool) -> FromMo
     }
 }
 
+fn merge_modifier_lists(
+    left: Option<Vec<String>>,
+    right: Option<Vec<String>>,
+) -> Option<Vec<String>> {
+    let mut out = left.unwrap_or_default();
+    for value in right.unwrap_or_default() {
+        if !out.contains(&value) {
+            out.push(value);
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn merge_from_modifiers(
+    base: FromModifiers,
+    extra: Option<&FromModifiers>,
+    allow_any_fallback: bool,
+) -> FromModifiers {
+    let mandatory = merge_modifier_lists(
+        base.mandatory.clone(),
+        extra.and_then(|m| m.mandatory.clone()),
+    );
+    let optional = merge_modifier_lists(
+        base.optional.clone(),
+        extra.and_then(|m| m.optional.clone()),
+    )
+    .or_else(|| {
+        if mandatory.is_none() && allow_any_fallback {
+            Some(vec!["any".to_string()])
+        } else {
+            None
+        }
+    });
+
+    FromModifiers {
+        mandatory,
+        optional,
+    }
+}
+
 fn simlayer_leader_enabled(layer: &Simlayer) -> bool {
     match layer.leader.as_ref() {
         Some(LeaderMode::Enabled(v)) => *v,
@@ -1073,6 +1117,11 @@ fn convert_mapping(
 
                 if layer.mode == SimlayerMode::Simultaneous {
                     // Simultaneous trigger (layer key + this key activates layer)
+                    let sim_modifiers = merge_from_modifiers(
+                        simlayer_from_modifiers(layer, false),
+                        from_mods.as_ref(),
+                        true,
+                    );
                     let sim_from = FromEvent::Simultaneous(FromSimultaneous {
                         simultaneous: vec![
                             SimultaneousKey {
@@ -1094,7 +1143,7 @@ fn convert_mapping(
                                 },
                             })]),
                         }),
-                        modifiers: Some(simlayer_from_modifiers(layer, true)),
+                        modifiers: Some(sim_modifiers),
                     });
 
                     let mut to_events = vec![ToEvent::SetVariable(ToSetVariable {
@@ -1825,6 +1874,87 @@ mod tests {
             .and_then(|m| m.mandatory.as_ref())
             .expect("mandatory modifiers");
         assert_eq!(mandatory, &vec!["left_control".to_string()]);
+    }
+
+    #[test]
+    fn simlayer_mapping_modifiers_propagate_to_simultaneous_trigger() {
+        let json = r#"{
+          "profile": { "alone": 90, "sim": 80 },
+          "simlayers": {
+            "k-mode": { "key": "k", "threshold": 80 }
+          },
+          "rules": [
+            {
+              "description": "k sim + cmd override",
+              "layer": "k-mode",
+              "mappings": [
+                { "from": { "key": "w", "modifiers": "left_command" }, "to": "tab" }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].manipulators.len(), 2);
+
+        let sim = rules[0]
+            .manipulators
+            .iter()
+            .find(|m| matches!(m.from, FromEvent::Simultaneous(_)))
+            .expect("simultaneous trigger");
+        let FromEvent::Simultaneous(sim_from) = &sim.from else {
+            panic!("expected simultaneous from");
+        };
+        let modifiers = sim_from.modifiers.as_ref().expect("simultaneous modifiers");
+        assert_eq!(
+            modifiers.mandatory.as_ref(),
+            Some(&vec!["left_command".to_string()])
+        );
+        assert!(
+            modifiers.optional.is_none(),
+            "mapping-level mandatory modifiers should not inherit optional:any fallback"
+        );
+    }
+
+    #[test]
+    fn simlayer_and_mapping_modifiers_merge_in_simultaneous_trigger() {
+        let json = r#"{
+          "profile": { "alone": 90, "sim": 80 },
+          "simlayers": {
+            "k-mode": { "key": "k", "modifiers": "left_option", "threshold": 80 }
+          },
+          "rules": [
+            {
+              "description": "k sim + merged modifiers",
+              "layer": "k-mode",
+              "mappings": [
+                { "from": { "key": "w", "modifiers": "left_command" }, "to": "tab" }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let sim = rules[0]
+            .manipulators
+            .iter()
+            .find(|m| matches!(m.from, FromEvent::Simultaneous(_)))
+            .expect("simultaneous trigger");
+        let FromEvent::Simultaneous(sim_from) = &sim.from else {
+            panic!("expected simultaneous from");
+        };
+        let mandatory = sim_from
+            .modifiers
+            .as_ref()
+            .and_then(|m| m.mandatory.as_ref())
+            .expect("mandatory modifiers");
+        assert_eq!(
+            mandatory,
+            &vec!["left_option".to_string(), "left_command".to_string()]
+        );
     }
 
     #[test]
