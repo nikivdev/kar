@@ -348,6 +348,33 @@ pub struct SendUserCommand {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct OpenWithModifierVariantSpec {
+    pub app: String,
+    #[serde(default)]
+    pub modifiers: Option<Modifiers>,
+    #[serde(default)]
+    pub optional: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct OpenWithHoldVariantSpec {
+    pub app: String,
+    #[serde(default = "default_open_with_hold_threshold_ms")]
+    pub threshold_ms: u32,
+}
+
+fn default_open_with_hold_threshold_ms() -> u32 {
+    500
+}
+
+#[derive(Debug, Clone)]
+struct AutoOpenWithHoldVariant {
+    to: ToKey,
+    signal_context: SignalContext,
+    threshold_ms: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToKey {
     Simple(String),
@@ -376,6 +403,9 @@ pub enum ToKey {
     },
     Multiple(Vec<ToKey>),
 }
+
+const INTERNAL_OPEN_WITH_MODIFIERS_KEY: &str = "_kar_open_with_modifiers";
+const INTERNAL_OPEN_WITH_HOLD_KEY: &str = "_kar_open_with_hold";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetVariableSpec {
@@ -588,16 +618,25 @@ fn convert_rule(user_rule: &UserRule, config: &UserConfig, rule_idx: usize) -> R
 
     for (mapping_idx, mapping) in user_rule.mappings.iter().enumerate() {
         let signal_context = build_signal_context(user_rule, mapping, rule_idx, mapping_idx);
-        let manips = convert_mapping(
+        let mut expanded_mappings = mapping_auto_open_with_modifier_variants(
             mapping,
-            simlayer,
-            &config.profile,
-            base_conditions.clone(),
-            leader_enabled,
-            leader_sticky,
+            simlayer.map(|(_, layer)| layer),
             &signal_context,
-        )?;
-        manipulators.extend(manips);
+        );
+        expanded_mappings.push((mapping.clone(), signal_context));
+
+        for (expanded_mapping, expanded_signal_context) in expanded_mappings {
+            let manips = convert_mapping(
+                &expanded_mapping,
+                simlayer,
+                &config.profile,
+                base_conditions.clone(),
+                leader_enabled,
+                leader_sticky,
+                &expanded_signal_context,
+            )?;
+            manipulators.extend(manips);
+        }
     }
 
     Ok(Rule {
@@ -810,6 +849,194 @@ fn merge_from_modifiers(
     }
 }
 
+fn is_modifier_key(key: &str) -> bool {
+    matches!(
+        key,
+        "left_command"
+            | "right_command"
+            | "left_control"
+            | "right_control"
+            | "left_option"
+            | "right_option"
+            | "left_shift"
+            | "right_shift"
+            | "caps_lock"
+            | "fn"
+    )
+}
+
+fn strip_internal_send_user_command_payload(payload: &serde_json::Value) -> serde_json::Value {
+    let serde_json::Value::Object(mut obj) = payload.clone() else {
+        return payload.clone();
+    };
+    obj.remove(INTERNAL_OPEN_WITH_MODIFIERS_KEY);
+    obj.remove(INTERNAL_OPEN_WITH_HOLD_KEY);
+    serde_json::Value::Object(obj)
+}
+
+fn open_with_modifier_variants(
+    send_user_command: &SendUserCommand,
+) -> Vec<OpenWithModifierVariantSpec> {
+    let serde_json::Value::Object(obj) = &send_user_command.payload else {
+        return Vec::new();
+    };
+    if obj.get("type").and_then(|v| v.as_str()) != Some("open_with_app") {
+        return Vec::new();
+    }
+    let Some(value) = obj.get(INTERNAL_OPEN_WITH_MODIFIERS_KEY) else {
+        return Vec::new();
+    };
+    serde_json::from_value(value.clone()).unwrap_or_default()
+}
+
+fn open_with_hold_variant(send_user_command: &SendUserCommand) -> Option<OpenWithHoldVariantSpec> {
+    let serde_json::Value::Object(obj) = &send_user_command.payload else {
+        return None;
+    };
+    if obj.get("type").and_then(|v| v.as_str()) != Some("open_with_app") {
+        return None;
+    }
+    let value = obj.get(INTERNAL_OPEN_WITH_HOLD_KEY)?;
+    serde_json::from_value(value.clone()).ok()
+}
+
+fn open_with_app_variant_to_key(send_user_command: &SendUserCommand, app: &str) -> Option<ToKey> {
+    let base_payload = strip_internal_send_user_command_payload(&send_user_command.payload);
+    let serde_json::Value::Object(mut payload_obj) = base_payload else {
+        return None;
+    };
+    payload_obj.insert(
+        "app".to_string(),
+        serde_json::Value::String(app.to_string()),
+    );
+    if let Some(target) = payload_obj
+        .get("target")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+    {
+        payload_obj.insert(
+            "line".to_string(),
+            serde_json::Value::String(format!("OPEN_WITH_APP {}:{}", app, target)),
+        );
+    }
+    Some(ToKey::SendUserCommand {
+        send_user_command: SendUserCommand {
+            payload: serde_json::Value::Object(payload_obj),
+            endpoint: send_user_command.endpoint.clone(),
+        },
+    })
+}
+
+fn mapping_auto_open_with_modifier_variants(
+    mapping: &Mapping,
+    simlayer: Option<&Simlayer>,
+    signal_context: &SignalContext,
+) -> Vec<(Mapping, SignalContext)> {
+    let Some(layer) = simlayer else {
+        return Vec::new();
+    };
+    if layer.mode != SimlayerMode::Simultaneous {
+        return Vec::new();
+    }
+    if mapping.to_if_alone.is_some()
+        || mapping.to_if_held.is_some()
+        || mapping.to_after_key_up.is_some()
+        || mapping.to_delayed.is_some()
+        || mapping.to_if_single_tap.is_some()
+    {
+        return Vec::new();
+    }
+
+    let key = match &mapping.from {
+        FromKey::Simple(key) if !is_modifier_key(key) => key.clone(),
+        FromKey::WithModifiers {
+            key,
+            modifiers: None,
+            optional: None,
+        } if !is_modifier_key(key) => key.clone(),
+        _ => return Vec::new(),
+    };
+
+    let ToKey::SendUserCommand { send_user_command } = &mapping.to else {
+        return Vec::new();
+    };
+    let variants = open_with_modifier_variants(send_user_command);
+    if variants.is_empty() {
+        return Vec::new();
+    }
+
+    variants
+        .into_iter()
+        .enumerate()
+        .filter_map(|(idx, variant)| {
+            let variant_to = open_with_app_variant_to_key(send_user_command, &variant.app)?;
+            let mut variant_mapping = mapping.clone();
+            variant_mapping.from = FromKey::WithModifiers {
+                key: key.clone(),
+                modifiers: variant.modifiers.clone(),
+                optional: variant.optional.clone(),
+            };
+            variant_mapping.to = variant_to;
+
+            let modifier_suffix = variant
+                .modifiers
+                .as_ref()
+                .map(|mods| slug_for_id(&mods.to_vec().join("-")))
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| format!("variant-{}", idx + 1));
+            let mut variant_signal_context = signal_context.clone();
+            variant_signal_context.mapping_id =
+                format!("{}.modifier.{}", signal_context.mapping_id, modifier_suffix);
+
+            Some((variant_mapping, variant_signal_context))
+        })
+        .collect()
+}
+
+fn mapping_auto_open_with_hold_variant(
+    mapping: &Mapping,
+    simlayer: Option<&Simlayer>,
+    signal_context: &SignalContext,
+) -> Option<AutoOpenWithHoldVariant> {
+    let Some(layer) = simlayer else {
+        return None;
+    };
+    if layer.mode != SimlayerMode::Simultaneous {
+        return None;
+    }
+    if mapping.to_if_alone.is_some()
+        || mapping.to_if_held.is_some()
+        || mapping.to_after_key_up.is_some()
+        || mapping.to_delayed.is_some()
+        || mapping.to_if_single_tap.is_some()
+    {
+        return None;
+    }
+
+    match &mapping.from {
+        FromKey::Simple(key) if !is_modifier_key(key) => {}
+        FromKey::WithModifiers {
+            key,
+            modifiers: None,
+            optional: None,
+        } if !is_modifier_key(key) => {}
+        _ => return None,
+    }
+
+    let ToKey::SendUserCommand { send_user_command } = &mapping.to else {
+        return None;
+    };
+    let hold = open_with_hold_variant(send_user_command)?;
+    let to = open_with_app_variant_to_key(send_user_command, &hold.app)?;
+    let mut hold_signal_context = signal_context.clone();
+    hold_signal_context.mapping_id = format!("{}.hold", signal_context.mapping_id);
+    Some(AutoOpenWithHoldVariant {
+        to,
+        signal_context: hold_signal_context,
+        threshold_ms: hold.threshold_ms,
+    })
+}
+
 fn simlayer_leader_enabled(layer: &Simlayer) -> bool {
     match layer.leader.as_ref() {
         Some(LeaderMode::Enabled(v)) => *v,
@@ -879,6 +1106,11 @@ fn convert_mapping(
     signal_context: &SignalContext,
 ) -> Result<Vec<Manipulator>> {
     let mut manipulators = Vec::new();
+    let auto_open_with_hold = mapping_auto_open_with_hold_variant(
+        mapping,
+        simlayer.map(|(_, layer)| layer),
+        signal_context,
+    );
 
     // Build condition chain: rule -> layer -> mapping
     let mut conditions =
@@ -1096,7 +1328,11 @@ fn convert_mapping(
                     manipulator_type: "basic".to_string(),
                     from,
                     to: {
-                        let mut events = convert_to_events(&mapping.to, Some(signal_context));
+                        let mut events = if auto_open_with_hold.is_some() {
+                            Vec::new()
+                        } else {
+                            convert_to_events(&mapping.to, Some(signal_context))
+                        };
                         if leader_enabled && !leader_sticky && layer.mode == SimlayerMode::Hold {
                             events.push(ToEvent::SetVariable(ToSetVariable {
                                 set_variable: SetVariable {
@@ -1105,14 +1341,40 @@ fn convert_mapping(
                                 },
                             }));
                         }
-                        Some(events)
+                        if events.is_empty() {
+                            None
+                        } else {
+                            Some(events)
+                        }
                     },
-                    to_if_alone: mapping_to_if_alone.clone(),
-                    to_if_held_down: mapping_to_if_held.clone(),
-                    to_after_key_up: mapping_to_after_key_up.clone(),
+                    to_if_alone: if auto_open_with_hold.is_some() {
+                        Some(convert_to_events(&mapping.to, Some(signal_context)))
+                    } else {
+                        mapping_to_if_alone.clone()
+                    },
+                    to_if_held_down: if let Some(auto_hold) = &auto_open_with_hold {
+                        Some(convert_to_events(
+                            &auto_hold.to,
+                            Some(&auto_hold.signal_context),
+                        ))
+                    } else {
+                        mapping_to_if_held.clone()
+                    },
+                    to_after_key_up: if auto_open_with_hold.is_some() {
+                        None
+                    } else {
+                        mapping_to_after_key_up.clone()
+                    },
                     to_delayed_action: mapping_to_delayed.clone(),
                     conditions: conditions.clone(),
-                    parameters: merge_mapping_parameters(mapping, None),
+                    parameters: merge_mapping_parameters(mapping, {
+                        let mut params = ManipulatorParameters::default();
+                        if let Some(auto_hold) = &auto_open_with_hold {
+                            params.to_if_alone_timeout = Some(auto_hold.threshold_ms);
+                            params.to_if_held_down_threshold = Some(auto_hold.threshold_ms);
+                        }
+                        Some(params)
+                    }),
                 });
 
                 if layer.mode == SimlayerMode::Simultaneous {
@@ -1152,15 +1414,32 @@ fn convert_mapping(
                             value: serde_json::Value::Number(1.into()),
                         },
                     })];
-                    to_events.extend(convert_to_events(&mapping.to, Some(signal_context)));
+                    if auto_open_with_hold.is_none() {
+                        to_events.extend(convert_to_events(&mapping.to, Some(signal_context)));
+                    }
 
                     manipulators.push(Manipulator {
                         manipulator_type: "basic".to_string(),
                         from: sim_from,
                         to: Some(to_events),
-                        to_if_alone: None,
-                        to_if_held_down: None,
-                        to_after_key_up: None,
+                        to_if_alone: if auto_open_with_hold.is_some() {
+                            Some(convert_to_events(&mapping.to, Some(signal_context)))
+                        } else {
+                            None
+                        },
+                        to_if_held_down: if let Some(auto_hold) = &auto_open_with_hold {
+                            Some(convert_to_events(
+                                &auto_hold.to,
+                                Some(&auto_hold.signal_context),
+                            ))
+                        } else {
+                            None
+                        },
+                        to_after_key_up: if auto_open_with_hold.is_some() {
+                            None
+                        } else {
+                            None
+                        },
                         to_delayed_action: None,
                         conditions: None,
                         parameters: merge_mapping_parameters(
@@ -1169,8 +1448,12 @@ fn convert_mapping(
                                 simultaneous_threshold: Some(
                                     layer.threshold.unwrap_or(profile.sim),
                                 ),
-                                to_if_alone_timeout: None,
-                                to_if_held_down_threshold: None,
+                                to_if_alone_timeout: auto_open_with_hold
+                                    .as_ref()
+                                    .map(|auto_hold| auto_hold.threshold_ms),
+                                to_if_held_down_threshold: auto_open_with_hold
+                                    .as_ref()
+                                    .map(|auto_hold| auto_hold.threshold_ms),
                                 to_delayed_action_delay: None,
                             }),
                         ),
@@ -1421,10 +1704,11 @@ fn convert_to_events(to: &ToKey, signal_context: Option<&SignalContext>) -> Vec<
             })]
         }
         ToKey::SendUserCommand { send_user_command } => {
+            let base_payload = strip_internal_send_user_command_payload(&send_user_command.payload);
             let payload = if let Some(ctx) = signal_context {
-                inject_signal_payload(&send_user_command.payload, ctx)
+                inject_signal_payload(&base_payload, ctx)
             } else {
-                send_user_command.payload.clone()
+                base_payload
             };
             if let Some(native_events) = native_text_events_from_payload(&payload) {
                 return native_events;
@@ -1434,6 +1718,7 @@ fn convert_to_events(to: &ToKey, signal_context: Option<&SignalContext>) -> Vec<
                     payload,
                     endpoint: send_user_command.endpoint.clone(),
                 },
+                halt: None,
             })]
         }
         ToKey::MouseKey { mouse_key } => {
@@ -1955,6 +2240,282 @@ mod tests {
             mandatory,
             &vec!["left_option".to_string(), "left_command".to_string()]
         );
+    }
+
+    #[test]
+    fn simlayer_open_with_modifier_variants_expand_before_plain_mapping() {
+        let json = r#"{
+          "profile": { "alone": 90, "sim": 80 },
+          "simlayers": {
+            "k-mode": { "key": "k", "threshold": 80 }
+          },
+          "rules": [
+            {
+              "description": "k auto editor override",
+              "layer": "k-mode",
+              "mappings": [
+                {
+                  "from": "w",
+                  "to": {
+                    "send_user_command": {
+                      "payload": {
+                        "v": 1,
+                        "type": "open_with_app",
+                        "app": "/Applications/Zed.app",
+                        "target": "/tmp/reatom",
+                        "line": "OPEN_WITH_APP /Applications/Zed.app:/tmp/reatom",
+                        "_kar_open_with_modifiers": [
+                          { "modifiers": "left_command", "app": "/Applications/Cursor.app" }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].manipulators.len(), 4);
+
+        let first = &rules[0].manipulators[0];
+        let FromEvent::KeyCode(first_from) = &first.from else {
+            panic!("expected keycode mapping first");
+        };
+        let mandatory = first_from
+            .modifiers
+            .as_ref()
+            .and_then(|m| m.mandatory.as_ref())
+            .expect("mandatory left_command");
+        assert_eq!(mandatory, &vec!["left_command".to_string()]);
+
+        let first_payload = match &first.to.as_ref().expect("to events")[0] {
+            ToEvent::SendUserCommand(cmd) => &cmd.send_user_command.payload,
+            _ => panic!("expected send_user_command"),
+        };
+        assert_eq!(
+            first_payload.get("app").and_then(|v| v.as_str()),
+            Some("/Applications/Cursor.app")
+        );
+        assert_eq!(
+            first_payload
+                .get("_kar_signal")
+                .and_then(|v| v.get("mapping_id"))
+                .and_then(|v| v.as_str()),
+            Some("rule.1.k-auto-editor-override.map.1.modifier.left-command")
+        );
+
+        let third = &rules[0].manipulators[2];
+        let FromEvent::KeyCode(third_from) = &third.from else {
+            panic!("expected plain keycode mapping");
+        };
+        assert_eq!(third_from.key_code, "w");
+        assert_eq!(
+            third_from
+                .modifiers
+                .as_ref()
+                .and_then(|m| m.optional.as_ref()),
+            Some(&vec!["any".to_string()])
+        );
+        let third_payload = match &third.to.as_ref().expect("to events")[0] {
+            ToEvent::SendUserCommand(cmd) => &cmd.send_user_command.payload,
+            _ => panic!("expected send_user_command"),
+        };
+        assert_eq!(
+            third_payload.get("app").and_then(|v| v.as_str()),
+            Some("/Applications/Zed.app")
+        );
+        assert!(
+            third_payload
+                .get(INTERNAL_OPEN_WITH_MODIFIERS_KEY)
+                .is_none(),
+            "internal auto-variant metadata should be stripped from emitted payloads"
+        );
+    }
+
+    #[test]
+    fn simlayer_open_with_hold_variant_uses_hold_for_cursor_and_tap_for_zed() {
+        let json = r#"{
+          "profile": { "alone": 90, "sim": 80 },
+          "simlayers": {
+            "j-mode": { "key": "j", "threshold": 80 }
+          },
+          "rules": [
+            {
+              "description": "j hold editor override",
+              "layer": "j-mode",
+              "mappings": [
+                {
+                  "from": "spacebar",
+                  "to": {
+                    "send_user_command": {
+                      "payload": {
+                        "v": 1,
+                        "type": "open_with_app",
+                        "app": "/Applications/Zed.app",
+                        "target": "/tmp/designer",
+                        "line": "OPEN_WITH_APP /Applications/Zed.app:/tmp/designer",
+                        "_kar_open_with_hold": {
+                          "app": "/Applications/Cursor.app",
+                          "threshold_ms": 2000
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].manipulators.len(), 2);
+
+        let sim = rules[0]
+            .manipulators
+            .iter()
+            .find(|m| matches!(m.from, FromEvent::Simultaneous(_)))
+            .expect("simultaneous trigger");
+        assert_eq!(
+            sim.parameters.as_ref().and_then(|p| p.to_if_alone_timeout),
+            Some(2000)
+        );
+        assert_eq!(
+            sim.parameters
+                .as_ref()
+                .and_then(|p| p.to_if_held_down_threshold),
+            Some(2000)
+        );
+
+        let hold_payload = match &sim.to_if_held_down.as_ref().expect("to_if_held_down")[0] {
+            ToEvent::SendUserCommand(cmd) => &cmd.send_user_command.payload,
+            _ => panic!("expected send_user_command"),
+        };
+        assert_eq!(
+            hold_payload.get("app").and_then(|v| v.as_str()),
+            Some("/Applications/Cursor.app")
+        );
+        assert_eq!(
+            hold_payload
+                .get("_kar_signal")
+                .and_then(|v| v.get("mapping_id"))
+                .and_then(|v| v.as_str()),
+            Some("rule.1.j-hold-editor-override.map.1.hold")
+        );
+
+        let tap_payload = match &sim.to_if_alone.as_ref().expect("to_if_alone")[0] {
+            ToEvent::SendUserCommand(cmd) => &cmd.send_user_command.payload,
+            _ => panic!("expected send_user_command"),
+        };
+        assert_eq!(
+            tap_payload.get("app").and_then(|v| v.as_str()),
+            Some("/Applications/Zed.app")
+        );
+        assert!(sim.to_after_key_up.is_none());
+
+        let sim_options = match &sim.from {
+            FromEvent::Simultaneous(from) => from
+                .simultaneous_options
+                .as_ref()
+                .expect("simultaneous options"),
+            _ => panic!("expected simultaneous from event"),
+        };
+        match &sim_options.to_after_key_up.as_ref().expect("layer reset")[0] {
+            ToEvent::SetVariable(v) => {
+                assert_eq!(v.set_variable.name, "j-mode");
+                assert_eq!(v.set_variable.value, serde_json::Value::Number(0.into()));
+            }
+            _ => panic!("expected layer reset"),
+        }
+    }
+
+    #[test]
+    fn send_user_command_internal_modifier_metadata_is_stripped() {
+        let json = r#"{
+          "rules": [
+            {
+              "description": "plain open_with_app",
+              "mappings": [
+                {
+                  "from": "w",
+                  "to": {
+                    "send_user_command": {
+                      "payload": {
+                        "v": 1,
+                        "type": "open_with_app",
+                        "app": "/Applications/Zed.app",
+                        "target": "/tmp/reatom",
+                        "_kar_open_with_hold": {
+                          "app": "/Applications/Cursor.app",
+                          "threshold_ms": 2000
+                        },
+                        "_kar_open_with_modifiers": [
+                          { "modifiers": "left_command", "app": "/Applications/Cursor.app" }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        let payload = match &rules[0].manipulators[0].to.as_ref().expect("to events")[0] {
+            ToEvent::SendUserCommand(cmd) => &cmd.send_user_command.payload,
+            _ => panic!("expected send_user_command"),
+        };
+        assert!(payload.get(INTERNAL_OPEN_WITH_MODIFIERS_KEY).is_none());
+        assert!(payload.get(INTERNAL_OPEN_WITH_HOLD_KEY).is_none());
+    }
+
+    #[test]
+    fn modifier_key_mappings_do_not_auto_expand_open_with_modifier_variants() {
+        let json = r#"{
+          "profile": { "alone": 90, "sim": 80 },
+          "simlayers": {
+            "k-mode": { "key": "k", "threshold": 80 }
+          },
+          "rules": [
+            {
+              "description": "k left command opener",
+              "layer": "k-mode",
+              "mappings": [
+                {
+                  "from": "left_command",
+                  "to": {
+                    "send_user_command": {
+                      "payload": {
+                        "v": 1,
+                        "type": "open_with_app",
+                        "app": "/Applications/Zed.app",
+                        "target": "/tmp/rise",
+                        "_kar_open_with_hold": {
+                          "app": "/Applications/Cursor.app",
+                          "threshold_ms": 2000
+                        },
+                        "_kar_open_with_modifiers": [
+                          { "modifiers": "left_command", "app": "/Applications/Cursor.app" }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rules(&config).expect("rules should build");
+        assert_eq!(rules[0].manipulators.len(), 2);
     }
 
     #[test]

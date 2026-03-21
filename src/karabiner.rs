@@ -249,6 +249,8 @@ pub struct SendUserCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToSendUserCommand {
     pub send_user_command: SendUserCommand,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub halt: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
