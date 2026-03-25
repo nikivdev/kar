@@ -59,6 +59,10 @@ alfred("workflow_id", "trigger_name", "optional_arg")
 
 // Raycast extension
 raycast("extensions/raycast/...")
+
+// Open Lin launcher modes without spawning a shell
+linLauncher({ mode: "ai", query: "summarize this repo" })
+linDocsSearch("karabiner")
 ```
 
 ## Modifiers
@@ -184,6 +188,8 @@ If you want to keep the path only once, use a build-time helper:
 { from: "p", to: seqOpenAppToggle("Arc") }            // socket_command -> seqd
 { from: "y", to: seqPasteText("/prompts:review-push") } // native key events fast-path for short ASCII
 { from: "u", to: seqEnterText("what to run next?") }  // same + enter
+{ from: "i", to: linLauncher({ mode: "ai", query: "review current diff" }) } // lin:// launcher payload
+{ from: "k", to: linDocsSearch("karabiner") }         // docs-scoped lin search
 ```
 
 ## Condition Coverage

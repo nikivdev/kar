@@ -442,6 +442,31 @@ export function openUrl(url: string): { shell: string } {
   return shell(`open "${url}"`)
 }
 
+export type LinLauncherMode = "ai" | "search" | "jsonSearch"
+
+export function linLauncher(
+  opts?: {
+    mode?: LinLauncherMode
+    query?: string
+  },
+): { send_user_command: SendUserCommand } {
+  const mode = opts?.mode ?? "ai"
+  const query = opts?.query ?? ""
+  const url = `lin://launcher?mode=${encodeURIComponent(mode)}&query=${encodeURIComponent(query)}`
+  return sendUserCommand(seqPayload({
+    type: "open",
+    target: url,
+  }))
+}
+
+export function linDocsSearch(query = ""): { send_user_command: SendUserCommand } {
+  const trimmed = query.trim()
+  return linLauncher({
+    mode: "search",
+    query: trimmed.length === 0 ? "ext: docs " : `ext: docs ${trimmed}`,
+  })
+}
+
 export function alfred(workflow: string, trigger: string, arg?: string): { shell: string } {
   const argPart = arg ? ` with argument "${arg}"` : ""
   return shell(`osascript -e 'tell application id "com.runningwithcrayons.Alfred" to run trigger "${trigger}" in workflow "${workflow}"${argPart}'`)
