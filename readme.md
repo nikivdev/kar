@@ -192,6 +192,69 @@ If you want to keep the path only once, use a build-time helper:
 { from: "k", to: linDocsSearch("karabiner") }         // docs-scoped lin search
 ```
 
+## Profile Timing
+
+```typescript
+export default {
+  profile: {
+    alone: 80,  // basic.to_if_alone_timeout_milliseconds
+    sim: 200,   // basic.simultaneous_threshold_milliseconds
+    held: 500,  // basic.to_if_held_down_threshold_milliseconds
+    delay: 200, // basic.to_delayed_action_delay_milliseconds
+  },
+  rules: [],
+} satisfies Config
+```
+
+## Raw Karabiner Escape Hatches
+
+Use `raw_rules` when valid Karabiner-Elements JSON is not yet represented by
+kar's simplified TypeScript DSL. Raw rules are preserved as JSON values instead
+of being reinterpreted through the simplified schema.
+
+```typescript
+export default {
+  rules: [
+    {
+      description: "typed DSL rule",
+      mappings: [{ from: "a", to: "b" }],
+    },
+  ],
+  raw_rules: [
+    {
+      description: "raw pointing button rule",
+      manipulators: [
+        {
+          type: "basic",
+          from: { pointing_button: "button4" },
+          to: [{ key_code: "escape" }],
+        },
+      ],
+    },
+  ],
+} satisfies Config
+```
+
+Use `raw_simple` for simple modifications that need non-`key_code` inputs such
+as pointing buttons or Apple vendor keys.
+
+```typescript
+export default {
+  rules: [],
+  raw_simple: [
+    {
+      from: { apple_vendor_top_case_key_code: "keyboard_fn" },
+      to: [{ key_code: "home" }],
+    },
+  ],
+} satisfies Config
+```
+
+If both `simple` and `raw_simple` are omitted, kar leaves existing simple
+modifications in the target profile untouched. If either field is present, kar
+manages the target profile's simple modifications; use `simple: []` or
+`raw_simple: []` to intentionally clear them.
+
 ## Condition Coverage
 
 Rule/layer conditions currently support:

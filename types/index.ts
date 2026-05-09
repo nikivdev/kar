@@ -7,6 +7,7 @@ export type KeyCode =
   | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "0"
   // Function keys
   | "f1" | "f2" | "f3" | "f4" | "f5" | "f6" | "f7" | "f8" | "f9" | "f10" | "f11" | "f12"
+  | "f13" | "f14" | "f15" | "f16" | "f17" | "f18" | "f19" | "f20" | "f21" | "f22" | "f23" | "f24"
   // Modifiers
   | "left_command" | "right_command" | "left_control" | "right_control"
   | "left_option" | "right_option" | "left_shift" | "right_shift"
@@ -34,6 +35,7 @@ export type KeyCode =
   // Special
   | "print_screen" | "scroll_lock" | "pause" | "insert"
   | "application" | "help" | "power" | "execute" | "menu" | "select" | "stop" | "again" | "undo"
+  | "vk_none"
 
 export type Modifier =
   | "command" | "control" | "option" | "shift"
@@ -43,12 +45,18 @@ export type Modifier =
   | "left_shift" | "right_shift"
   | "fn" | "caps_lock"
 
+export type OptionalModifier = Modifier | "any"
+
 // Profile timing settings
 export interface ProfileSettings {
   /** Timeout for to_if_alone in ms (default: 80) */
   alone?: number
   /** Threshold for simultaneous key detection in ms (default: 200) */
   sim?: number
+  /** Threshold for to_if_held_down in ms */
+  held?: number
+  /** Delay for to_delayed_action in ms */
+  delay?: number
 }
 
 export interface LeaderMode {
@@ -63,7 +71,7 @@ export interface Simlayer {
   /** Mandatory modifiers for the layer key (e.g. left_control + w) */
   modifiers?: Modifier | Modifier[]
   /** Optional modifiers accepted with the layer key */
-  optional?: Modifier[]
+  optional?: OptionalModifier[]
   /** Optional custom threshold in ms */
   threshold?: number
   /** Optional custom to_if_alone timeout in ms for hold mode */
@@ -83,8 +91,8 @@ export interface Simlayer {
 // From key specification
 export type FromKey =
   | KeyCode
-  | { key: KeyCode; modifiers?: Modifier | Modifier[]; optional?: Modifier[] }
-  | { double_tap: KeyCode; modifiers?: Modifier | Modifier[]; optional?: Modifier[] }
+  | { key: KeyCode; modifiers?: Modifier | Modifier[]; optional?: OptionalModifier[] }
+  | { double_tap: KeyCode; modifiers?: Modifier | Modifier[]; optional?: OptionalModifier[] }
   | KeyCode[] // Simultaneous keys
 
 // Mouse key specification
@@ -97,7 +105,7 @@ export interface MouseKey {
 }
 
 // Pointing button (mouse click)
-export type PointingButton = "button1" | "button2" | "button3"
+export type PointingButton = "button1" | "button2" | "button3" | "button4" | "button5" | "button6"
 
 export interface SocketCommand {
   endpoint: string
@@ -252,7 +260,24 @@ export interface Config {
   simple?: SimpleModification[]
   /** Import rules from JSON files or existing profiles */
   imports?: ImportSource[]
-  rules: Rule[]
+  rules?: Rule[]
+  raw_rules?: RawKarabinerRule[]
+  raw_simple?: RawSimpleModification[]
+}
+
+export type RawKarabinerRule = Record<string, unknown>
+
+export type RawSimpleModificationKey =
+  | { key_code: string | number }
+  | { consumer_key_code: string | number }
+  | { apple_vendor_keyboard_key_code: string }
+  | { apple_vendor_top_case_key_code: string }
+  | { pointing_button: PointingButton | string | number }
+  | Record<string, unknown>
+
+export interface RawSimpleModification {
+  from: RawSimpleModificationKey
+  to: RawSimpleModificationKey[]
 }
 
 // Helper functions for building shell commands
@@ -274,13 +299,13 @@ export function sendUserCommand(payload: unknown, endpoint?: string): { send_use
 
 export interface ModifierVariant {
   modifiers?: Modifier | Modifier[]
-  optional?: Modifier[]
+  optional?: OptionalModifier[]
   to: ToKey
 }
 
 export interface PathModifierVariant {
   modifiers?: Modifier | Modifier[]
-  optional?: Modifier[]
+  optional?: OptionalModifier[]
   open: (path: string) => ToKey
 }
 
@@ -355,8 +380,8 @@ export function toSetVar(name: string, value: number | boolean | string): { set_
 // Declare a double-tap from-key object.
 export function doubleTap(
   key: KeyCode,
-  options?: { modifiers?: Modifier | Modifier[]; optional?: Modifier[] },
-): { double_tap: KeyCode; modifiers?: Modifier | Modifier[]; optional?: Modifier[] } {
+  options?: { modifiers?: Modifier | Modifier[]; optional?: OptionalModifier[] },
+): { double_tap: KeyCode; modifiers?: Modifier | Modifier[]; optional?: OptionalModifier[] } {
   return {
     double_tap: key,
     ...(options?.modifiers ? { modifiers: options.modifiers } : {}),
