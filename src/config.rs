@@ -18,11 +18,15 @@ pub struct UserConfig {
     #[serde(default)]
     pub simlayers: HashMap<String, Simlayer>,
     #[serde(default)]
-    pub simple: Vec<SimpleModification>,
+    pub simple: Option<Vec<SimpleModification>>,
     #[serde(default)]
     pub imports: Vec<ImportSource>,
     #[serde(default)]
     pub rules: Vec<UserRule>,
+    #[serde(default)]
+    pub raw_rules: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub raw_simple: Option<Vec<SimpleModificationEntry>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,12 +50,27 @@ pub struct SimpleModification {
     pub note: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileSettings {
     #[serde(default = "default_alone")]
     pub alone: u32,
     #[serde(default = "default_sim")]
     pub sim: u32,
+    #[serde(default)]
+    pub held: Option<u32>,
+    #[serde(default)]
+    pub delay: Option<u32>,
+}
+
+impl Default for ProfileSettings {
+    fn default() -> Self {
+        Self {
+            alone: default_alone(),
+            sim: default_sim(),
+            held: None,
+            delay: None,
+        }
+    }
 }
 
 fn default_alone() -> u32 {
@@ -424,7 +443,15 @@ pub fn to_karabiner_rules(config: &UserConfig) -> Result<Vec<Rule>> {
             rules.push(rule);
         }
     }
+    Ok(rules)
+}
 
+pub fn to_karabiner_rule_values(config: &UserConfig) -> Result<Vec<serde_json::Value>> {
+    let mut rules = to_karabiner_rules(config)?
+        .into_iter()
+        .map(serde_json::to_value)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    rules.extend(config.raw_rules.clone());
     Ok(rules)
 }
 
@@ -432,7 +459,7 @@ pub fn load_imported_rules(
     config: &UserConfig,
     config_path: &Path,
     default_karabiner_path: &Path,
-) -> Result<Vec<Rule>> {
+) -> Result<Vec<serde_json::Value>> {
     let mut out = Vec::new();
     let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
 
@@ -494,15 +521,15 @@ pub fn load_imported_rules(
     Ok(out)
 }
 
-fn parse_imported_rules_value(value: &serde_json::Value) -> Result<Vec<Rule>> {
+fn parse_imported_rules_value(value: &serde_json::Value) -> Result<Vec<serde_json::Value>> {
     if let Some(rules_val) = value.get("rules") {
-        return Ok(serde_json::from_value(rules_val.clone())?);
+        return parse_imported_rules_value(rules_val);
     }
     if value.is_array() {
-        return Ok(serde_json::from_value(value.clone())?);
+        return Ok(value.as_array().cloned().unwrap_or_default());
     }
     if value.get("manipulators").is_some() {
-        return Ok(vec![serde_json::from_value(value.clone())?]);
+        return Ok(vec![value.clone()]);
     }
     anyhow::bail!("expected JSON object with 'rules', a rules array, or a single rule object");
 }
@@ -649,6 +676,8 @@ pub fn to_karabiner_parameters(profile: &ProfileSettings) -> Parameters {
     Parameters {
         simultaneous_threshold: Some(profile.sim),
         to_if_alone_timeout: Some(profile.alone),
+        to_if_held_down_threshold: profile.held,
+        to_delayed_action_delay: profile.delay,
         ..Default::default()
     }
 }
@@ -1138,6 +1167,7 @@ fn convert_mapping(
                     .iter()
                     .map(|k| SimultaneousKey {
                         key_code: k.clone(),
+                        pointing_button: None,
                     })
                     .collect(),
                 simultaneous_options: Some(SimultaneousOptions {
@@ -1388,9 +1418,11 @@ fn convert_mapping(
                         simultaneous: vec![
                             SimultaneousKey {
                                 key_code: layer.key.clone(),
+                                pointing_button: None,
                             },
                             SimultaneousKey {
                                 key_code: key_code.clone(),
+                                pointing_button: None,
                             },
                         ],
                         simultaneous_options: Some(SimultaneousOptions {
@@ -1746,19 +1778,31 @@ fn convert_to_events(to: &ToKey, signal_context: Option<&SignalContext>) -> Vec<
 }
 
 /// Convert simple modifications from user config to Karabiner format
-pub fn to_simple_modifications(config: &UserConfig) -> Vec<SimpleModificationEntry> {
-    config
+pub fn to_simple_modifications(config: &UserConfig) -> Option<Vec<SimpleModificationEntry>> {
+    if config.simple.is_none() && config.raw_simple.is_none() {
+        return None;
+    }
+
+    let mut simple: Vec<SimpleModificationEntry> = config
         .simple
+        .as_deref()
+        .unwrap_or_default()
         .iter()
         .map(|s| SimpleModificationEntry {
             from: SimpleModificationKey {
-                key_code: s.from.clone(),
+                key_code: Some(s.from.clone()),
+                other: serde_json::Map::new(),
             },
             to: vec![SimpleModificationKey {
-                key_code: s.to.clone(),
+                key_code: Some(s.to.clone()),
+                other: serde_json::Map::new(),
             }],
         })
-        .collect()
+        .collect();
+    if let Some(raw_simple) = &config.raw_simple {
+        simple.extend(raw_simple.clone());
+    }
+    Some(simple)
 }
 
 #[cfg(test)]
@@ -2845,9 +2889,99 @@ mod tests {
         let loaded =
             load_imported_rules(&config, &config_path, &import_path).expect("load imports");
         assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].description, "imported");
+        assert_eq!(loaded[0]["description"], "imported");
 
         let _ = std::fs::remove_file(import_path);
+    }
+
+    #[test]
+    fn missing_profile_uses_timing_defaults() {
+        let config: UserConfig = serde_json::from_str(r#"{"rules":[]}"#).expect("valid config");
+        let params = to_karabiner_parameters(&config.profile);
+        assert_eq!(params.to_if_alone_timeout, Some(80));
+        assert_eq!(params.simultaneous_threshold, Some(200));
+        assert_eq!(params.to_if_held_down_threshold, None);
+        assert_eq!(params.to_delayed_action_delay, None);
+    }
+
+    #[test]
+    fn profile_held_and_delay_emit_parameters() {
+        let config: UserConfig = serde_json::from_str(
+            r#"{
+              "profile": { "alone": 100, "sim": 50, "held": 500, "delay": 250 },
+              "rules": []
+            }"#,
+        )
+        .expect("valid config");
+        let params = to_karabiner_parameters(&config.profile);
+        assert_eq!(params.to_if_alone_timeout, Some(100));
+        assert_eq!(params.simultaneous_threshold, Some(50));
+        assert_eq!(params.to_if_held_down_threshold, Some(500));
+        assert_eq!(params.to_delayed_action_delay, Some(250));
+    }
+
+    #[test]
+    fn raw_rules_are_json_pass_through_and_appended() {
+        let json = r#"{
+          "rules": [
+            {
+              "description": "native",
+              "mappings": [{ "from": "a", "to": "b" }]
+            }
+          ],
+          "raw_rules": [
+            {
+              "description": "raw",
+              "manipulators": [
+                {
+                  "type": "basic",
+                  "from": { "consumer_key_code": "play_or_pause" },
+                  "to": [
+                    {
+                      "select_input_source": {
+                        "language": "en"
+                      }
+                    }
+                  ],
+                  "custom_future_field": { "kept": true }
+                }
+              ]
+            }
+          ]
+        }"#;
+        let config: UserConfig = serde_json::from_str(json).expect("valid config");
+        let rules = to_karabiner_rule_values(&config).expect("rule values");
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0]["description"], "native");
+        assert_eq!(rules[1]["description"], "raw");
+        assert_eq!(
+            rules[1]["manipulators"][0]["from"]["consumer_key_code"],
+            "play_or_pause"
+        );
+        assert_eq!(
+            rules[1]["manipulators"][0]["to"][0]["select_input_source"]["language"],
+            "en"
+        );
+        assert_eq!(
+            rules[1]["manipulators"][0]["custom_future_field"]["kept"],
+            true
+        );
+    }
+
+    #[test]
+    fn raw_simple_omission_preserves_and_explicit_empty_clears() {
+        let omitted: UserConfig = serde_json::from_str(r#"{"rules":[]}"#).expect("valid config");
+        assert!(to_simple_modifications(&omitted).is_none());
+
+        let explicit_empty: UserConfig =
+            serde_json::from_str(r#"{"rules":[],"simple":[],"raw_simple":[]}"#)
+                .expect("valid config");
+        assert_eq!(
+            to_simple_modifications(&explicit_empty)
+                .expect("explicit simple")
+                .len(),
+            0
+        );
     }
 
     #[test]
@@ -2889,7 +3023,7 @@ mod tests {
         let loaded =
             load_imported_rules(&config, &config_path, &karabiner_path).expect("load profile");
         assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].description, "from profile");
+        assert_eq!(loaded[0]["description"], "from profile");
 
         let _ = std::fs::remove_file(karabiner_path);
     }

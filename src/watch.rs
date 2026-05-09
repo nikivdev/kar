@@ -62,7 +62,7 @@ pub fn watch(config_path: &Path, profile: &str) -> Result<()> {
 fn build_once(config_path: &Path, karabiner_path: &Path, profile: &str) -> Result<()> {
     let json = runtime::execute_config(config_path)?;
     let user_config: config::UserConfig = serde_json::from_str(&json)?;
-    let mut rules = config::to_karabiner_rules(&user_config)?;
+    let mut rules = config::to_karabiner_rule_values(&user_config)?;
     let imported = config::load_imported_rules(&user_config, config_path, karabiner_path)?;
     rules.extend(imported);
     let simple_mods = config::to_simple_modifications(&user_config);

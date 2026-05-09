@@ -43,7 +43,10 @@ pub struct SimpleModificationEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimpleModificationKey {
-    pub key_code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_code: Option<String>,
+    #[serde(flatten)]
+    pub other: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -51,7 +54,7 @@ pub struct ComplexModifications {
     #[serde(default)]
     pub parameters: Parameters,
     #[serde(default)]
-    pub rules: Vec<Rule>,
+    pub rules: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -139,12 +142,20 @@ pub struct ToDelayedAction {
 #[serde(untagged)]
 pub enum FromEvent {
     KeyCode(FromKeyCode),
+    PointingButton(FromPointingButton),
     Simultaneous(FromSimultaneous),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FromKeyCode {
     pub key_code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modifiers: Option<FromModifiers>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FromPointingButton {
+    pub pointing_button: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modifiers: Option<FromModifiers>,
 }
@@ -160,7 +171,10 @@ pub struct FromSimultaneous {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimultaneousKey {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub key_code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pointing_button: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +205,7 @@ pub enum ToEvent {
     KeyCode(ToKeyCode),
     ConsumerKeyCode(ToConsumerKeyCode),
     PointingButton(ToPointingButton),
+    SoftwareFunction(ToSoftwareFunction),
     ShellCommand(ToShellCommand),
     SocketCommand(ToSocketCommand),
     SendUserCommand(ToSendUserCommand),
@@ -210,6 +225,11 @@ pub struct ToConsumerKeyCode {
     pub consumer_key_code: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modifiers: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToSoftwareFunction {
+    pub software_function: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -360,8 +380,8 @@ pub enum Condition {
 pub fn update_profile(
     path: &Path,
     profile_name: &str,
-    rules: Vec<Rule>,
-    simple_modifications: Vec<SimpleModificationEntry>,
+    rules: Vec<serde_json::Value>,
+    simple_modifications: Option<Vec<SimpleModificationEntry>>,
     parameters: Option<Parameters>,
 ) -> Result<()> {
     let content = std::fs::read_to_string(path)
@@ -409,7 +429,7 @@ pub fn update_profile(
     if let Some(params) = parameters {
         profile.complex_modifications.parameters = params;
     }
-    if !simple_modifications.is_empty() {
+    if let Some(simple_modifications) = simple_modifications {
         profile.simple_modifications = simple_modifications;
     }
 
@@ -417,4 +437,80 @@ pub fn update_profile(
     std::fs::write(path, output).with_context(|| format!("Failed to write {}", path.display()))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_karabiner_path(name: &str) -> std::path::PathBuf {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        std::env::temp_dir().join(format!("{name}_{ts}.json"))
+    }
+
+    #[test]
+    fn update_profile_preserves_simple_modifications_when_unmanaged() {
+        let path = temp_karabiner_path("kar_preserve_simple");
+        std::fs::write(
+            &path,
+            r#"{
+              "profiles": [
+                {
+                  "name": "kar",
+                  "selected": true,
+                  "simple_modifications": [
+                    { "from": { "key_code": "a" }, "to": [{ "key_code": "b" }] }
+                  ],
+                  "complex_modifications": { "rules": [] }
+                }
+              ]
+            }"#,
+        )
+        .expect("write config");
+
+        update_profile(&path, "kar", Vec::new(), None, None).expect("update");
+        let config: KarabinerConfig =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        assert_eq!(config.profiles[0].simple_modifications.len(), 1);
+        assert_eq!(
+            config.profiles[0].simple_modifications[0]
+                .from
+                .key_code
+                .as_deref(),
+            Some("a")
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn update_profile_clears_simple_modifications_when_explicit_empty() {
+        let path = temp_karabiner_path("kar_clear_simple");
+        std::fs::write(
+            &path,
+            r#"{
+              "profiles": [
+                {
+                  "name": "kar",
+                  "selected": true,
+                  "simple_modifications": [
+                    { "from": { "key_code": "a" }, "to": [{ "key_code": "b" }] }
+                  ],
+                  "complex_modifications": { "rules": [] }
+                }
+              ]
+            }"#,
+        )
+        .expect("write config");
+
+        update_profile(&path, "kar", Vec::new(), Some(Vec::new()), None).expect("update");
+        let config: KarabinerConfig =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        assert!(config.profiles[0].simple_modifications.is_empty());
+
+        let _ = std::fs::remove_file(path);
+    }
 }

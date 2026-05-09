@@ -71,7 +71,7 @@ fn build(config_path: &PathBuf, dry_run: bool, profile: &str) -> Result<()> {
         .join(".config/karabiner/karabiner.json");
 
     // Convert to Karabiner format (native + imported rules)
-    let mut rules = config::to_karabiner_rules(&user_config)?;
+    let mut rules = config::to_karabiner_rule_values(&user_config)?;
     let imported = config::load_imported_rules(&user_config, config_path, &karabiner_path)?;
     rules.extend(imported);
     let simple_mods = config::to_simple_modifications(&user_config);
